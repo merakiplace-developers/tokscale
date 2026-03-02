@@ -72,6 +72,12 @@ struct Cli {
     #[arg(long, help = "Show only Qwen CLI usage")]
     qwen: bool,
 
+    #[arg(long, help = "Show only Roo Code usage")]
+    roocode: bool,
+
+    #[arg(long, help = "Show only KiloCode usage")]
+    kilocode: bool,
+
     #[arg(long, help = "Show only today's usage")]
     today: bool,
 
@@ -135,6 +141,10 @@ enum Commands {
         kimi: bool,
         #[arg(long, help = "Show only Qwen CLI usage")]
         qwen: bool,
+        #[arg(long, help = "Show only Roo Code usage")]
+        roocode: bool,
+        #[arg(long, help = "Show only KiloCode usage")]
+        kilocode: bool,
         #[arg(long, help = "Show only today's usage")]
         today: bool,
         #[arg(long, help = "Show last 7 days")]
@@ -187,6 +197,10 @@ enum Commands {
         kimi: bool,
         #[arg(long, help = "Show only Qwen CLI usage")]
         qwen: bool,
+        #[arg(long, help = "Show only Roo Code usage")]
+        roocode: bool,
+        #[arg(long, help = "Show only KiloCode usage")]
+        kilocode: bool,
         #[arg(long, help = "Show only today's usage")]
         today: bool,
         #[arg(long, help = "Show last 7 days")]
@@ -251,6 +265,10 @@ enum Commands {
         kimi: bool,
         #[arg(long, help = "Show only Qwen CLI usage")]
         qwen: bool,
+        #[arg(long, help = "Show only Roo Code usage")]
+        roocode: bool,
+        #[arg(long, help = "Show only KiloCode usage")]
+        kilocode: bool,
         #[arg(long, help = "Show only today's usage")]
         today: bool,
         #[arg(long, help = "Show last 7 days")]
@@ -292,6 +310,10 @@ enum Commands {
         kimi: bool,
         #[arg(long, help = "Show only Qwen CLI usage")]
         qwen: bool,
+        #[arg(long, help = "Show only Roo Code usage")]
+        roocode: bool,
+        #[arg(long, help = "Show only KiloCode usage")]
+        kilocode: bool,
         #[arg(long, help = "Show only today's usage")]
         today: bool,
         #[arg(long, help = "Show last 7 days")]
@@ -329,6 +351,10 @@ enum Commands {
         kimi: bool,
         #[arg(long, help = "Include only Qwen CLI data")]
         qwen: bool,
+        #[arg(long, help = "Show only Roo Code usage")]
+        roocode: bool,
+        #[arg(long, help = "Show only KiloCode usage")]
+        kilocode: bool,
         #[arg(long, help = "Submit only today's usage")]
         today: bool,
         #[arg(long, help = "Submit last 7 days")]
@@ -388,6 +414,10 @@ enum Commands {
         kimi: bool,
         #[arg(long, help = "Show only Qwen CLI usage")]
         qwen: bool,
+        #[arg(long, help = "Show only Roo Code usage")]
+        roocode: bool,
+        #[arg(long, help = "Show only KiloCode usage")]
+        kilocode: bool,
         #[arg(
             long,
             help = "Display total tokens in abbreviated format (e.g., 7.14B)"
@@ -467,6 +497,8 @@ fn main() -> Result<()> {
             pi,
             kimi,
             qwen,
+            roocode,
+            kilocode,
             today,
             week,
             month,
@@ -495,6 +527,8 @@ fn main() -> Result<()> {
                 pi,
                 kimi,
                 qwen,
+                roocode,
+                kilocode,
             });
             let (since, until) = build_date_filter(today, week, month, since, until);
             let year = normalize_year_filter(today, week, month, year);
@@ -539,6 +573,8 @@ fn main() -> Result<()> {
             pi,
             kimi,
             qwen,
+            roocode,
+            kilocode,
             today,
             week,
             month,
@@ -560,6 +596,8 @@ fn main() -> Result<()> {
                 pi,
                 kimi,
                 qwen,
+                roocode,
+                kilocode,
             });
             let (since, until) = build_date_filter(today, week, month, since, until);
             let year = normalize_year_filter(today, week, month, year);
@@ -612,6 +650,8 @@ fn main() -> Result<()> {
             pi,
             kimi,
             qwen,
+            roocode,
+            kilocode,
             today,
             week,
             month,
@@ -633,6 +673,8 @@ fn main() -> Result<()> {
                 pi,
                 kimi,
                 qwen,
+                roocode,
+                kilocode,
             });
             let (since, until) = build_date_filter(today, week, month, since, until);
             let year = normalize_year_filter(today, week, month, year);
@@ -650,6 +692,8 @@ fn main() -> Result<()> {
             pi,
             kimi,
             qwen,
+            roocode,
+            kilocode,
             today,
             week,
             month,
@@ -669,6 +713,8 @@ fn main() -> Result<()> {
                 pi,
                 kimi,
                 qwen,
+                roocode,
+                kilocode,
             });
             let (since, until) = build_date_filter(today, week, month, since, until);
             let year = normalize_year_filter(today, week, month, year);
@@ -695,6 +741,8 @@ fn main() -> Result<()> {
             pi,
             kimi,
             qwen,
+            roocode,
+            kilocode,
             today,
             week,
             month,
@@ -715,6 +763,8 @@ fn main() -> Result<()> {
                 pi,
                 kimi,
                 qwen,
+                roocode,
+                kilocode,
             });
             let (since, until) = build_date_filter(today, week, month, since, until);
             let year = normalize_year_filter(today, week, month, year);
@@ -741,6 +791,8 @@ fn main() -> Result<()> {
             pi,
             kimi,
             qwen,
+            roocode,
+            kilocode,
             short,
             agents,
             clients,
@@ -759,6 +811,8 @@ fn main() -> Result<()> {
                 pi,
                 kimi,
                 qwen,
+                roocode,
+                kilocode,
             });
             run_wrapped_command(
                 output,
@@ -784,6 +838,8 @@ fn main() -> Result<()> {
                 pi: cli.pi,
                 kimi: cli.kimi,
                 qwen: cli.qwen,
+                roocode: cli.roocode,
+                kilocode: cli.kilocode,
             });
             let (since, until) =
                 build_date_filter(cli.today, cli.week, cli.month, cli.since, cli.until);
@@ -849,6 +905,8 @@ struct ClientFlags {
     pi: bool,
     kimi: bool,
     qwen: bool,
+    roocode: bool,
+    kilocode: bool,
 }
 
 fn build_client_filter(flags: ClientFlags) -> Option<Vec<String>> {
@@ -866,6 +924,8 @@ fn build_client_filter(flags: ClientFlags) -> Option<Vec<String>> {
         (ClientId::Pi, flags.pi),
         (ClientId::Kimi, flags.kimi),
         (ClientId::Qwen, flags.qwen),
+        (ClientId::RooCode, flags.roocode),
+        (ClientId::KiloCode, flags.kilocode),
     ]
     .into_iter()
     .filter(|(_, enabled)| *enabled)
@@ -3155,6 +3215,8 @@ mod tests {
             pi: false,
             kimi: false,
             qwen: false,
+            roocode: false,
+            kilocode: false,
         };
         assert_eq!(build_client_filter(flags), None);
     }
@@ -3173,6 +3235,8 @@ mod tests {
             pi: false,
             kimi: false,
             qwen: false,
+            roocode: false,
+            kilocode: false,
         };
         assert_eq!(
             build_client_filter(flags),
@@ -3194,6 +3258,8 @@ mod tests {
             pi: true,
             kimi: false,
             qwen: false,
+            roocode: false,
+            kilocode: false,
         };
         assert_eq!(
             build_client_filter(flags),
@@ -3219,11 +3285,13 @@ mod tests {
             pi: true,
             kimi: true,
             qwen: true,
+            roocode: true,
+            kilocode: true,
         };
         let result = build_client_filter(flags);
         assert!(result.is_some());
         let sources = result.unwrap();
-        assert_eq!(sources.len(), 11);
+        assert_eq!(sources.len(), 13);
         assert!(sources.contains(&"opencode".to_string()));
         assert!(sources.contains(&"claude".to_string()));
         assert!(sources.contains(&"codex".to_string()));
@@ -3235,6 +3303,8 @@ mod tests {
         assert!(sources.contains(&"pi".to_string()));
         assert!(sources.contains(&"kimi".to_string()));
         assert!(sources.contains(&"qwen".to_string()));
+        assert!(sources.contains(&"roocode".to_string()));
+        assert!(sources.contains(&"kilocode".to_string()));
     }
 
     #[test]

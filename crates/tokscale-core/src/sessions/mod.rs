@@ -8,11 +8,13 @@ pub mod codex;
 pub mod cursor;
 pub mod droid;
 pub mod gemini;
+pub mod kilocode;
 pub mod kimi;
 pub mod openclaw;
 pub mod opencode;
 pub mod pi;
 pub mod qwen;
+pub mod roocode;
 pub(crate) mod utils;
 
 use crate::TokenBreakdown;
