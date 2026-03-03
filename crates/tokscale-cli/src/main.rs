@@ -529,7 +529,8 @@ fn main() -> Result<()> {
             qwen,
             roocode,
             kilocode,
-            mux,            synthetic,
+            mux,
+            synthetic,
             today,
             week,
             month,
@@ -608,7 +609,8 @@ fn main() -> Result<()> {
             qwen,
             roocode,
             kilocode,
-            mux,            synthetic,
+            mux,
+            synthetic,
             today,
             week,
             month,
@@ -688,7 +690,8 @@ fn main() -> Result<()> {
             qwen,
             roocode,
             kilocode,
-            mux,            synthetic,
+            mux,
+            synthetic,
             today,
             week,
             month,
@@ -733,7 +736,8 @@ fn main() -> Result<()> {
             qwen,
             roocode,
             kilocode,
-            mux,            synthetic,
+            mux,
+            synthetic,
             today,
             week,
             month,
@@ -785,7 +789,8 @@ fn main() -> Result<()> {
             qwen,
             roocode,
             kilocode,
-            mux,            synthetic,
+            mux,
+            synthetic,
             today,
             week,
             month,
@@ -838,7 +843,8 @@ fn main() -> Result<()> {
             qwen,
             roocode,
             kilocode,
-            mux,            synthetic,
+            mux,
+            synthetic,
             short,
             agents,
             clients,
@@ -2860,7 +2866,7 @@ fn run_submit_command(
     use colored::Colorize;
     use std::io::IsTerminal;
     use tokio::runtime::Runtime;
-    use tokscale_core::{generate_graph, GroupBy, ReportOptions};
+    use tokscale_core::{generate_graph, ClientId, GroupBy, ReportOptions};
 
     let credentials = match auth::load_credentials() {
         Some(creds) => creds,
@@ -3073,6 +3079,21 @@ fn run_submit_command(
             eprintln!("\n  {}", "Error: Failed to connect to server.".red());
             eprintln!("{}\n", format!("  {}", err).bright_black());
             std::process::exit(1);
+        }
+    }
+
+    // Warm the TUI cache so the next `tokscale` launch is instant.
+    // We load with all clients and no date filters (default TUI view)
+    // to maximize cache hit rate.
+    {
+        use crate::tui::{save_cached_data, DataLoader};
+        use std::collections::HashSet;
+
+        let all_clients: Vec<ClientId> = ClientId::iter().collect();
+        let enabled_set: HashSet<ClientId> = all_clients.iter().copied().collect();
+        let loader = DataLoader::with_filters(None, None, None, None);
+        if let Ok(data) = loader.load(&all_clients, &GroupBy::default(), false) {
+            save_cached_data(&data, &enabled_set, false);
         }
     }
 
