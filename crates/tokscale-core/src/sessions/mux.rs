@@ -32,7 +32,6 @@ pub struct MuxModelUsage {
 #[derive(Debug, Deserialize)]
 pub struct MuxTokenBucket {
     pub tokens: Option<i64>,
-    #[allow(dead_code)]
     pub cost_usd: Option<f64>,
 }
 
@@ -77,12 +76,19 @@ pub fn parse_mux_file(path: &Path) -> Vec<UnifiedMessage> {
         .into_iter()
         .filter_map(|(model_key, model_usage)| {
             let tokens =
-                |b: &Option<MuxTokenBucket>| b.as_ref().and_then(|b| b.tokens).unwrap_or(0);
+                |b: &Option<MuxTokenBucket>| b.as_ref().and_then(|b| b.tokens).unwrap_or(0).max(0);
+            let cost =
+                |b: &Option<MuxTokenBucket>| b.as_ref().and_then(|b| b.cost_usd).unwrap_or(0.0);
             let input = tokens(&model_usage.input);
             let cached = tokens(&model_usage.cached);
             let cache_create = tokens(&model_usage.cache_create);
             let output = tokens(&model_usage.output);
             let reasoning = tokens(&model_usage.reasoning);
+            let source_cost = cost(&model_usage.input)
+                + cost(&model_usage.cached)
+                + cost(&model_usage.cache_create)
+                + cost(&model_usage.output)
+                + cost(&model_usage.reasoning);
 
             if input == 0 && cached == 0 && cache_create == 0 && output == 0 && reasoning == 0 {
                 return None;
@@ -111,7 +117,7 @@ pub fn parse_mux_file(path: &Path) -> Vec<UnifiedMessage> {
                     cache_write: cache_create,
                     reasoning,
                 },
-                0.0,
+                source_cost,
             ))
         })
         .collect()
@@ -245,5 +251,65 @@ mod tests {
     fn test_nonexistent_file() {
         let msgs = parse_mux_file(Path::new("/nonexistent/path/session-usage.json"));
         assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn test_negative_tokens_clamped() {
+        let json = r#"{
+            "version": 1,
+            "byModel": {
+                "anthropic:claude-opus-4-6": {
+                    "input": { "tokens": -50, "cost_usd": 0.01 },
+                    "output": { "tokens": 100, "cost_usd": 0.02 }
+                }
+            },
+            "lastRequest": { "timestamp": 1700000000000 }
+        }"#;
+        let f = write_temp_json(json);
+        let msgs = parse_mux_file(f.path());
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].tokens.input, 0);
+        assert_eq!(msgs[0].tokens.output, 100);
+    }
+
+    #[test]
+    fn test_source_cost_summed() {
+        let json = r#"{
+            "version": 1,
+            "byModel": {
+                "anthropic:claude-opus-4-6": {
+                    "input": { "tokens": 100, "cost_usd": 0.01 },
+                    "cached": { "tokens": 200, "cost_usd": 0.02 },
+                    "cacheCreate": { "tokens": 50, "cost_usd": 0.005 },
+                    "output": { "tokens": 300, "cost_usd": 0.03 },
+                    "reasoning": { "tokens": 0, "cost_usd": 0 }
+                }
+            },
+            "lastRequest": { "timestamp": 1700000000000 }
+        }"#;
+        let f = write_temp_json(json);
+        let msgs = parse_mux_file(f.path());
+        assert_eq!(msgs.len(), 1);
+        let expected_cost = 0.01 + 0.02 + 0.005 + 0.03;
+        assert!((msgs[0].cost - expected_cost).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_multi_colon_model_key() {
+        let json = r#"{
+            "version": 1,
+            "byModel": {
+                "provider:sub:model-name": {
+                    "input": { "tokens": 100 },
+                    "output": { "tokens": 200 }
+                }
+            },
+            "lastRequest": { "timestamp": 1700000000000 }
+        }"#;
+        let f = write_temp_json(json);
+        let msgs = parse_mux_file(f.path());
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].provider_id, "provider");
+        assert_eq!(msgs[0].model_id, "sub:model-name");
     }
 }
