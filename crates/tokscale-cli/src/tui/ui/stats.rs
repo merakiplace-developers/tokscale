@@ -1,5 +1,7 @@
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+};
 
 use super::widgets::{
     format_cost, format_tokens, get_client_color, get_client_display_name, get_model_color,
@@ -388,7 +390,7 @@ fn render_stats_panel(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-fn render_breakdown_panel(frame: &mut Frame, app: &App, area: Rect) {
+fn render_breakdown_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
@@ -552,8 +554,33 @@ fn render_breakdown_panel(frame: &mut Frame, app: &App, area: Rect) {
         )));
     }
 
-    let paragraph = Paragraph::new(lines);
+    let visible_height = inner.height.max(1) as usize;
+    app.max_visible_items = visible_height;
+    app.stats_breakdown_total_lines = lines.len();
+
+    let max_scroll = lines.len().saturating_sub(visible_height);
+    app.scroll_offset = app.scroll_offset.min(max_scroll);
+
+    let paragraph = Paragraph::new(lines).scroll((app.scroll_offset as u16, 0));
     frame.render_widget(paragraph, inner);
+
+    if app.stats_breakdown_total_lines > visible_height {
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("▲"))
+            .end_symbol(Some("▼"));
+
+        let mut scrollbar_state =
+            ScrollbarState::new(app.stats_breakdown_total_lines).position(app.scroll_offset);
+
+        frame.render_stateful_widget(
+            scrollbar,
+            area.inner(Margin {
+                horizontal: 0,
+                vertical: 1,
+            }),
+            &mut scrollbar_state,
+        );
+    }
 }
 
 fn truncate_model_name(s: &str, max_chars: usize) -> String {

@@ -119,6 +119,7 @@ pub struct App {
     pub max_visible_items: usize,
 
     pub selected_graph_cell: Option<(usize, usize)>,
+    pub stats_breakdown_total_lines: usize,
 
     pub auto_refresh: bool,
     pub auto_refresh_interval: Duration,
@@ -207,6 +208,7 @@ impl App {
             selected_index: 0,
             max_visible_items: 20,
             selected_graph_cell: None,
+            stats_breakdown_total_lines: 0,
             auto_refresh,
             auto_refresh_interval,
             last_refresh: Instant::now(),
@@ -349,6 +351,9 @@ impl App {
             }
             KeyCode::Esc => {
                 self.selected_graph_cell = None;
+                self.stats_breakdown_total_lines = 0;
+                self.selected_index = 0;
+                self.scroll_offset = 0;
             }
             _ => {}
         }
@@ -381,6 +386,9 @@ impl App {
                         }
                         ClickAction::GraphCell { week, day } => {
                             self.selected_graph_cell = Some((*week, *day));
+                            self.stats_breakdown_total_lines = 0;
+                            self.selected_index = 0;
+                            self.scroll_offset = 0;
                         }
                     }
                     break;
@@ -422,6 +430,7 @@ impl App {
         self.scroll_offset = 0;
         self.selected_index = 0;
         self.selected_graph_cell = None;
+        self.stats_breakdown_total_lines = 0;
     }
 
     fn move_selection_up(&mut self) {
@@ -461,7 +470,13 @@ impl App {
         match self.current_tab {
             Tab::Overview | Tab::Models => self.data.models.len(),
             Tab::Daily => self.data.daily.len(),
-            Tab::Stats => 0,
+            Tab::Stats => {
+                if self.selected_graph_cell.is_some() {
+                    self.stats_breakdown_total_lines
+                } else {
+                    0
+                }
+            }
         }
     }
 
