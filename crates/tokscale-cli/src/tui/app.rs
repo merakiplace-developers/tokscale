@@ -305,6 +305,18 @@ impl App {
             KeyCode::Down => {
                 self.move_selection_down();
             }
+            KeyCode::PageUp => {
+                self.move_page_up();
+            }
+            KeyCode::PageDown => {
+                self.move_page_down();
+            }
+            KeyCode::Home => {
+                self.move_to_top();
+            }
+            KeyCode::End => {
+                self.move_to_bottom();
+            }
             KeyCode::Char('c') => {
                 self.set_sort(SortField::Cost);
             }
@@ -511,6 +523,49 @@ impl App {
                 self.scroll_offset = self.selected_index - self.max_visible_items + 1;
             }
         }
+    }
+
+    fn move_page_up(&mut self) {
+        let len = self.get_current_list_len();
+        if len == 0 {
+            return;
+        }
+        let jump = (self.max_visible_items / 2).max(1);
+        self.selected_index = self.selected_index.saturating_sub(jump);
+        if self.selected_index < self.scroll_offset {
+            self.scroll_offset = self.selected_index;
+        }
+    }
+
+    fn move_page_down(&mut self) {
+        let len = self.get_current_list_len();
+        if len == 0 {
+            return;
+        }
+        let jump = (self.max_visible_items / 2).max(1);
+        let max_index = len - 1;
+        self.selected_index = (self.selected_index + jump).min(max_index);
+        if self.selected_index >= self.scroll_offset + self.max_visible_items {
+            self.scroll_offset = self.selected_index - self.max_visible_items + 1;
+        }
+    }
+
+    fn move_to_top(&mut self) {
+        let len = self.get_current_list_len();
+        if len == 0 {
+            return;
+        }
+        self.selected_index = 0;
+        self.scroll_offset = 0;
+    }
+
+    fn move_to_bottom(&mut self) {
+        let len = self.get_current_list_len();
+        if len == 0 {
+            return;
+        }
+        self.selected_index = len - 1;
+        self.scroll_offset = len.saturating_sub(self.max_visible_items);
     }
 
     fn get_current_list_len(&self) -> usize {

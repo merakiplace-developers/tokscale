@@ -15,16 +15,48 @@ const MONTH_LABELS: &[&str] = &[
 const DAY_LABELS: &[&str] = &["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(12), Constraint::Length(12)])
-        .split(area);
+    let has_selected_cell = app.selected_graph_cell.is_some();
+    let stats_compact_h: u16 = 8;
+    let min_breakdown_h: u16 = 6;
+    let min_graph_h: u16 = 12;
+    let sufficient_for_both = area.height >= min_graph_h + stats_compact_h + min_breakdown_h;
 
-    render_graph(frame, app, chunks[0]);
+    if has_selected_cell && sufficient_for_both {
+        // Three-zone layout: graph + compact stats + breakdown
+        let non_stats = area.height.saturating_sub(stats_compact_h);
+        let surplus = non_stats.saturating_sub(min_graph_h + min_breakdown_h);
+        let graph_h = min_graph_h + (surplus * 3 / 5); // 60% of surplus to graph
+        let breakdown_h = non_stats.saturating_sub(graph_h); // 40% to breakdown
 
-    if app.selected_graph_cell.is_some() {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(graph_h),
+                Constraint::Length(stats_compact_h),
+                Constraint::Length(breakdown_h),
+            ])
+            .split(area);
+
+        render_graph(frame, app, chunks[0]);
+        render_stats_panel(frame, app, chunks[1]);
+        render_breakdown_panel(frame, app, chunks[2]);
+    } else if has_selected_cell {
+        // Not enough room for both: graph + breakdown only
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(12), Constraint::Length(12)])
+            .split(area);
+
+        render_graph(frame, app, chunks[0]);
         render_breakdown_panel(frame, app, chunks[1]);
     } else {
+        // No cell selected: graph + full stats
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(12), Constraint::Length(12)])
+            .split(area);
+
+        render_graph(frame, app, chunks[0]);
         render_stats_panel(frame, app, chunks[1]);
     }
 }
