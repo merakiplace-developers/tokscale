@@ -124,12 +124,12 @@ AI支援開発の時代において、**トークンは新しいエネルギー*
 
 ## 機能
 
-- **インタラクティブTUIモード** - OpenTUIによる美しいターミナルUI（デフォルトモード）
+- **インタラクティブTUIモード** - Ratatuiによる美しいターミナルUI（デフォルトモード）
   - 4つのインタラクティブビュー：概要、モデル、日別、統計
   - キーボード＆マウスナビゲーション
   - 9色テーマのGitHubスタイル貢献グラフ
   - リアルタイムフィルタリングとソート
-  - ゼロフリッカーレンダリング（ネイティブZigエンジン）
+  - ゼロフリッカーレンダリング
 - **マルチプラットフォームサポート** - OpenCode、Claude Code、Codex CLI、Cursor IDE、Gemini CLI、Amp、Droid、OpenClaw、Pi、Kimi CLI、Qwen CLI、Roo Code、Kilo、Mux、Synthetic全体の使用量追跡
 - **リアルタイム価格** - 1時間ディスクキャッシュ付きでLiteLLMから現在の価格を取得；OpenRouter自動フォールバックと新規モデル向けCursor価格サポート
 - **詳細な内訳** - 入力、出力、キャッシュ読み書き、推論トークン追跡
@@ -144,26 +144,24 @@ AI支援開発の時代において、**トークンは新しいエネルギー*
 ### クイックスタート
 
 ```bash
-# Bunをインストール（まだインストールしていない場合）
-curl -fsSL https://bun.sh/install | bash
+# npxで直接実行
+npx tokscale@latest
 
-# bunxで直接実行
+# またはbunxを使用
 bunx tokscale@latest
 
-# ライトモード（OpenTUIなし、テーブルレンダリングのみ）
-bunx tokscale@latest --light
+# ライトモード（テーブルレンダリングのみ）
+npx tokscale@latest --light
 ```
 
 これだけです！セットアップ不要で完全なインタラクティブTUI体験が得られます。
-
-> **[Bun](https://bun.sh/)が必要**: インタラクティブTUIはゼロフリッカーレンダリングのためにOpenTUIのネイティブZigモジュールを使用しており、Bunランタイムが必要です。
 
 > **パッケージ構造**: `tokscale`は`@tokscale/cli`をインストールするエイリアスパッケージです（[`swc`](https://www.npmjs.com/package/swc)のように）。どちらもネイティブRustコア（`@tokscale/core`）を含む同じCLIをインストールします。
 
 
 ### 前提条件
 
-- [Bun](https://bun.sh/)（必須）
+- [Node.js](https://nodejs.org/) または [Bun](https://bun.sh/)
 - （オプション）ソースからネイティブモジュールをビルドするためのRustツールチェーン
 
 ### 開発環境セットアップ
@@ -713,7 +711,7 @@ cd packages/cli && bun src/cli.ts --light
 - `packages/cli`: `bun run dev`、`bun run tui`
 - `packages/core`: `bun run build:debug`、`bun run test`、`bun run bench`
 
-**注**: このプロジェクトは**Bun**をパッケージマネージャー兼ランタイムとして使用しています。TUIはOpenTUIのネイティブモジュールのためBunが必要です。
+**注**: このプロジェクトは開発時に**Bun**をパッケージマネージャーとして使用しています。
 
 ### テスト
 
@@ -1145,7 +1143,7 @@ Tokscaleは[LiteLLMの価格データベース](https://github.com/BerriAI/litel
 ## 謝辞
 
 - インスピレーションを与えてくれた[ccusage](https://github.com/ryoppippi/ccusage)、[viberank](https://github.com/sculptdotfun/viberank)、[Isometric Contributions](https://github.com/jasonlong/isometric-contributions)
-- ゼロフリッカーターミナルUIフレームワーク[OpenTUI](https://github.com/sst/opentui)
+- ターミナルUIフレームワーク[Ratatui](https://github.com/ratatui/ratatui)
 - リアクティブレンダリングの[Solid.js](https://www.solidjs.com/)
 - 価格データの[LiteLLM](https://github.com/BerriAI/litellm)
 - Rust/Node.jsバインディングの[napi-rs](https://napi.rs/)

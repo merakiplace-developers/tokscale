@@ -124,12 +124,12 @@
 
 ## 功能
 
-- **交互式 TUI 模式** - 由 OpenTUI 驱动的精美终端 UI（默认模式）
+- **交互式 TUI 模式** - 由 Ratatui 驱动的精美终端 UI（默认模式）
   - 4 个交互式视图：概览、模型、每日、统计
   - 键盘和鼠标导航
   - 9 种颜色主题的 GitHub 风格贡献图
   - 实时筛选和排序
-  - 零闪烁渲染（原生 Zig 引擎）
+  - 零闪烁渲染
 - **多平台支持** - 跟踪 OpenCode、Claude Code、Codex CLI、Cursor IDE、Gemini CLI、Amp、Droid、OpenClaw、Pi、Kimi CLI、Qwen CLI、Roo Code、Kilo、Mux 和 Synthetic 的使用情况
 - **实时定价** - 从 LiteLLM 获取当前价格，带 1 小时磁盘缓存；OpenRouter 自动回退和新模型的 Cursor 定价支持
 - **详细分解** - 输入、输出、缓存读写和推理 Token 跟踪
@@ -144,26 +144,24 @@
 ### 快速开始
 
 ```bash
-# 安装 Bun（如果尚未安装）
-curl -fsSL https://bun.sh/install | bash
+# 直接用 npx 运行
+npx tokscale@latest
 
-# 直接用 bunx 运行
+# 或使用 bunx
 bunx tokscale@latest
 
-# 轻量模式（无 OpenTUI，仅表格渲染）
-bunx tokscale@latest --light
+# 轻量模式（仅表格渲染）
+npx tokscale@latest --light
 ```
 
 就这样！零配置即可获得完整的交互式 TUI 体验。
-
-> **需要 [Bun](https://bun.sh/)**：交互式 TUI 使用 OpenTUI 的原生 Zig 模块实现零闪烁渲染，这需要 Bun 运行时。
 
 > **包结构**：`tokscale` 是一个别名包（类似 [`swc`](https://www.npmjs.com/package/swc)），它安装 `@tokscale/cli`。两者都安装包含原生 Rust 核心（`@tokscale/core`）的相同 CLI。
 
 
 ### 先决条件
 
-- [Bun](https://bun.sh/)（必需）
+- [Node.js](https://nodejs.org/) 或 [Bun](https://bun.sh/)
 - （可选）从源码构建原生模块的 Rust 工具链
 
 ### 开发环境设置
@@ -713,7 +711,7 @@ cd packages/cli && bun src/cli.ts --light
 - `packages/cli`：`bun run dev`、`bun run tui`
 - `packages/core`：`bun run build:debug`、`bun run test`、`bun run bench`
 
-**注意**：此项目使用 **Bun** 作为包管理器和运行时。TUI 需要 Bun，因为 OpenTUI 的原生模块。
+**注意**：此项目使用 **Bun** 作为开发时的包管理器。
 
 ### 测试
 
@@ -1145,7 +1143,7 @@ Tokscale 从 [LiteLLM 的价格数据库](https://github.com/BerriAI/litellm/blo
 ## 致谢
 
 - 感谢 [ccusage](https://github.com/ryoppippi/ccusage)、[viberank](https://github.com/sculptdotfun/viberank) 和 [Isometric Contributions](https://github.com/jasonlong/isometric-contributions) 提供的灵感
-- [OpenTUI](https://github.com/sst/opentui) 零闪烁终端 UI 框架
+- [Ratatui](https://github.com/ratatui/ratatui) 终端 UI 框架
 - [Solid.js](https://www.solidjs.com/) 响应式渲染
 - [LiteLLM](https://github.com/BerriAI/litellm) 价格数据
 - [napi-rs](https://napi.rs/) Rust/Node.js 绑定
