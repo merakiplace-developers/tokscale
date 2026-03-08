@@ -124,12 +124,12 @@ AI 지원 개발 시대에 **토큰은 새로운 에너지**입니다. 토큰은
 
 ## 기능
 
-- **인터랙티브 TUI 모드** - OpenTUI 기반의 터미널 UI (기본 모드)
+- **인터랙티브 TUI 모드** - Ratatui 기반의 터미널 UI (기본 모드)
   - 4개 뷰: 개요, 모델, 일별, 통계
   - 키보드 및 마우스 지원
   - 9가지 테마의 GitHub 스타일 기여 그래프
   - 실시간 필터링 및 정렬
-  - 깜빡임 없는 렌더링 (네이티브 Zig 엔진)
+  - 깜빡임 없는 렌더링
 - **멀티 플랫폼 지원** - OpenCode, Claude Code, Codex CLI, Cursor IDE, Gemini CLI, Amp, Droid, OpenClaw, Pi, Kimi CLI, Qwen CLI, Roo Code, Kilo, Mux, Synthetic 사용량 통합 추적
 - **실시간 가격 반영** - LiteLLM에서 최신 가격을 가져와(디스크 캐시 1시간) 비용 계산; OpenRouter 자동 폴백 및 신규 모델용 Cursor 가격 지원
 - **상세 분석** - 입력, 출력, 캐시 읽기/쓰기, 추론 토큰까지 추적
@@ -144,25 +144,23 @@ AI 지원 개발 시대에 **토큰은 새로운 에너지**입니다. 토큰은
 ### 빠른 시작
 
 ```bash
-# Bun 설치 (아직 설치하지 않은 경우)
-curl -fsSL https://bun.sh/install | bash
+# npx로 바로 실행
+npx tokscale@latest
 
-# bunx로 바로 실행
+# 또는 bunx 사용
 bunx tokscale@latest
 
-# 라이트 모드 (OpenTUI 없이, 테이블 렌더링만)
-bunx tokscale@latest --light
+# 라이트 모드 (테이블 렌더링만)
+npx tokscale@latest --light
 ```
 
 이게 전부입니다! 별도 설정 없이 바로 완전한 인터랙티브 TUI 경험을 제공합니다.
-
-> **[Bun](https://bun.sh/) 필요**: 인터랙티브 TUI는 깜빡임 없는 렌더링을 위해 OpenTUI의 네이티브 Zig 모듈을 사용하며, 이는 Bun 런타임이 필요합니다.
 
 > **패키지 구조**: `tokscale`은 `@tokscale/cli`를 설치하는 별칭 패키지입니다 ([`swc`](https://www.npmjs.com/package/swc)처럼). 둘 다 네이티브 Rust 코어 (`@tokscale/core`)가 포함된 동일한 CLI를 설치합니다.
 
 ### 사전 요구사항
 
-- [Bun](https://bun.sh/) (필수)
+- [Node.js](https://nodejs.org/) 또는 [Bun](https://bun.sh/)
 - (선택) 소스에서 네이티브 모듈을 빌드하려면 Rust 툴체인
 
 ### 개발 환경 설정
@@ -712,7 +710,7 @@ cd packages/cli && bun src/cli.ts --light
 - `packages/cli`: `bun run dev`, `bun run tui`
 - `packages/core`: `bun run build:debug`, `bun run test`, `bun run bench`
 
-**참고**: 이 프로젝트는 **Bun**을 패키지 매니저 및 런타임으로 사용합니다. TUI는 OpenTUI의 네이티브 모듈 때문에 Bun이 필요합니다.
+**참고**: 이 프로젝트는 개발 시 **Bun**을 패키지 매니저로 사용합니다.
 
 ### 테스트
 
@@ -1143,7 +1141,7 @@ Tokscale은 [LiteLLM의 가격 데이터베이스](https://github.com/BerriAI/li
 ## 감사의 글
 
 - 영감을 준 [ccusage](https://github.com/ryoppippi/ccusage), [viberank](https://github.com/sculptdotfun/viberank), [Isometric Contributions](https://github.com/jasonlong/isometric-contributions)
-- 깜빡임 없는 터미널 UI 프레임워크 [OpenTUI](https://github.com/sst/opentui)
+- 터미널 UI 프레임워크 [Ratatui](https://github.com/ratatui/ratatui)
 - 반응형 렌더링을 위한 [Solid.js](https://www.solidjs.com/)
 - 가격 데이터를 위한 [LiteLLM](https://github.com/BerriAI/litellm)
 - Rust/Node.js 바인딩을 위한 [napi-rs](https://napi.rs/)

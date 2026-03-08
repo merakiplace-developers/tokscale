@@ -126,12 +126,12 @@ In the age of AI-assisted development, **tokens are the new energy**. They power
 
 ## Features
 
-- **Interactive TUI Mode** - Beautiful terminal UI powered by OpenTUI (default mode)
+- **Interactive TUI Mode** - Beautiful terminal UI powered by Ratatui (default mode)
   - 4 interactive views: Overview, Models, Daily, Stats
   - Keyboard & mouse navigation
   - GitHub-style contribution graph with 9 color themes
   - Real-time filtering and sorting
-  - Zero flicker rendering (native Zig engine)
+  - Zero flicker rendering
 - **Multi-platform support** - Track usage across OpenCode, Claude Code, Codex CLI, Cursor IDE, Gemini CLI, Amp, Droid, OpenClaw, Pi, Kimi CLI, Qwen CLI, Roo Code, Kilo, Mux, and Synthetic
 - **Real-time pricing** - Fetches current pricing from LiteLLM with 1-hour disk cache; automatic OpenRouter fallback and Cursor model pricing for newly released models
 - **Detailed breakdowns** - Input, output, cache read/write, and reasoning token tracking
@@ -146,26 +146,24 @@ In the age of AI-assisted development, **tokens are the new energy**. They power
 ### Quick Start
 
 ```bash
-# Install Bun (if not already installed)
-curl -fsSL https://bun.sh/install | bash
+# Run directly with npx
+npx tokscale@latest
 
-# Run directly with bunx
+# Or use bunx
 bunx tokscale@latest
 
-# Light mode (no OpenTUI, just table rendering)
-bunx tokscale@latest --light
+# Light mode (table rendering only)
+npx tokscale@latest --light
 ```
 
 That's it! This gives you the full interactive TUI experience with zero setup.
-
-> **Requires [Bun](https://bun.sh/)**: The interactive TUI uses OpenTUI's native Zig modules for zero-flicker rendering, which requires the Bun runtime.
 
 > **Package Structure**: `tokscale` is an alias package (like [`swc`](https://www.npmjs.com/package/swc)) that installs `@tokscale/cli`. Both install the same CLI with the native Rust core (`@tokscale/core`) included.
 
 
 ### Prerequisites
 
-- [Bun](https://bun.sh/) (required)
+- [Node.js](https://nodejs.org/) or [Bun](https://bun.sh/)
 - (Optional) Rust toolchain for building native module from source
 
 ### Development Setup
@@ -715,7 +713,7 @@ cd packages/cli && bun src/cli.ts --light
 - `packages/cli`: `bun run dev`, `bun run tui`
 - `packages/core`: `bun run build:debug`, `bun run test`, `bun run bench`
 
-**Note**: This project uses **Bun** as the package manager and runtime. TUI requires Bun due to OpenTUI's native modules.
+**Note**: This project uses **Bun** as the package manager for development.
 
 ### Testing
 
@@ -1146,7 +1144,7 @@ Contributions are welcome! Please follow these steps:
 ## Acknowledgments
 
 - [ccusage](https://github.com/ryoppippi/ccusage), [viberank](https://github.com/sculptdotfun/viberank), and [Isometric Contributions](https://github.com/jasonlong/isometric-contributions) for inspiration
-- [OpenTUI](https://github.com/sst/opentui) for zero-flicker terminal UI framework
+- [Ratatui](https://github.com/ratatui/ratatui) for terminal UI framework
 - [Solid.js](https://www.solidjs.com/) for reactive rendering
 - [LiteLLM](https://github.com/BerriAI/litellm) for pricing data
 - [napi-rs](https://napi.rs/) for Rust/Node.js bindings
