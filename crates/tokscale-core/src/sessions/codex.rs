@@ -198,13 +198,11 @@ pub fn parse_codex_file(path: &Path) -> Vec<UnifiedMessage> {
                     if let Some(total) = total_usage {
                         previous_totals = Some(total);
                     } else if let Some(last) = last_usage {
-                        previous_totals = previous_totals.map(|previous| {
-                            CodexTotals {
-                                input: previous.input.saturating_add(last.input),
-                                output: previous.output.saturating_add(last.output),
-                                cached: previous.cached.saturating_add(last.cached),
-                                reasoning: previous.reasoning.saturating_add(last.reasoning),
-                            }
+                        previous_totals = previous_totals.map(|previous| CodexTotals {
+                            input: previous.input.saturating_add(last.input),
+                            output: previous.output.saturating_add(last.output),
+                            cached: previous.cached.saturating_add(last.cached),
+                            reasoning: previous.reasoning.saturating_add(last.reasoning),
                         });
                     }
 
