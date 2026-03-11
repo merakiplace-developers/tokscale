@@ -28,8 +28,18 @@ pub struct CodexPayload {
     pub payload_type: Option<String>,
     pub model: Option<String>,
     pub model_name: Option<String>,
+    pub model_info: Option<CodexModelInfo>,
     pub info: Option<CodexInfo>,
     pub source: Option<String>,
+    /// Provider identity from session_meta (e.g. "openai", "azure")
+    pub model_provider: Option<String>,
+    /// Agent name from session_meta
+    pub agent_nickname: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CodexModelInfo {
+    pub slug: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,7 +59,7 @@ pub struct CodexTokenUsage {
     pub reasoning_output_tokens: Option<i64>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct CodexTotals {
     input: i64,
     output: i64,
@@ -64,8 +74,8 @@ impl CodexTotals {
             output: usage.output_tokens.unwrap_or(0).max(0),
             cached: usage
                 .cached_input_tokens
-                .or(usage.cache_read_input_tokens)
                 .unwrap_or(0)
+                .max(usage.cache_read_input_tokens.unwrap_or(0))
                 .max(0),
             reasoning: usage.reasoning_output_tokens.unwrap_or(0).max(0),
         }
@@ -157,6 +167,8 @@ pub fn parse_codex_file(path: &Path) -> Vec<UnifiedMessage> {
     let mut current_model: Option<String> = None;
     let mut previous_totals: Option<CodexTotals> = None;
     let mut session_is_headless = false;
+    let mut session_provider: Option<String> = None;
+    let mut session_agent: Option<String> = None;
 
     for line in reader.lines() {
         let line = match line {
@@ -174,9 +186,16 @@ pub fn parse_codex_file(path: &Path) -> Vec<UnifiedMessage> {
         buffer.extend_from_slice(trimmed.as_bytes());
         if let Ok(entry) = simd_json::from_slice::<CodexEntry>(&mut buffer) {
             if let Some(payload) = entry.payload {
-                // Check session_meta for headless exec sessions
-                if entry.entry_type == "session_meta" && payload.source.as_deref() == Some("exec") {
-                    session_is_headless = true;
+                if entry.entry_type == "session_meta" {
+                    if payload.source.as_deref() == Some("exec") {
+                        session_is_headless = true;
+                    }
+                    if let Some(ref provider) = payload.model_provider {
+                        session_provider = Some(provider.clone());
+                    }
+                    if let Some(ref nickname) = payload.agent_nickname {
+                        session_agent = Some(nickname.clone());
+                    }
                 }
                 // Extract model from turn_context
                 if entry.entry_type == "turn_context" {
@@ -207,40 +226,56 @@ pub fn parse_codex_file(path: &Path) -> Vec<UnifiedMessage> {
                         .clone()
                         .unwrap_or_else(|| "unknown".to_string());
 
-                    // Prefer cumulative totals when available so repeated snapshot rows do not
-                    // re-count the same usage. Fall back to last-token usage when totals are
-                    // missing or appear to reset.
+                    // Use last_token_usage as the primary increment source.
+                    // Upstream totals are mutable snapshots (compaction, context-window
+                    // capping can rewrite them), so we only use total_token_usage for
+                    // dedup and monotonicity checks — never as a direct delta source.
                     let total_usage = info.total_token_usage.as_ref().map(CodexTotals::from_usage);
                     let last_usage = info.last_token_usage.as_ref().map(CodexTotals::from_usage);
 
                     let (tokens, next_totals) = match (total_usage, last_usage, previous_totals) {
-                        (Some(total), _, None) => (total.into_tokens(), Some(total)),
-                        (Some(total), _, Some(previous)) => {
+                        // Both present with previous baseline (standard path)
+                        (Some(total), Some(last), Some(previous)) => {
+                            if total == previous {
+                                continue;
+                            }
+                            if total.delta_from(previous).is_none()
+                                && total.looks_like_stale_regression(previous, last)
+                            {
+                                continue;
+                            }
+                            (last.into_tokens(), Some(total))
+                        }
+                        // Both present, first event — use last (NOT full total) to
+                        // avoid overcounting tokens carried from a resumed session.
+                        (Some(total), Some(last), None) => (last.into_tokens(), Some(total)),
+                        // Only total, have previous (defensive — upstream schema
+                        // requires both when info is present)
+                        (Some(total), None, Some(previous)) => {
+                            if total == previous {
+                                continue;
+                            }
                             if let Some(delta) = total.delta_from(previous) {
                                 (delta.into_tokens(), Some(total))
-                            } else if let Some(last) = last_usage {
-                                if total.looks_like_stale_regression(previous, last) {
-                                    (last.into_tokens(), Some(previous.saturating_add(last)))
-                                } else {
-                                    (last.into_tokens(), Some(total))
-                                }
                             } else {
-                                // Totals regressed with no last_usage fallback;
-                                // reset baseline and skip to avoid double-counting.
                                 previous_totals = Some(total);
                                 continue;
                             }
                         }
+                        // Only total, first event, no last — legacy/degraded path
+                        (Some(total), None, None) => (total.into_tokens(), Some(total)),
+                        // Only last, have previous
                         (None, Some(last), Some(previous)) => {
                             (last.into_tokens(), Some(previous.saturating_add(last)))
                         }
+                        // Only last, no previous
                         (None, Some(last), None) => (last.into_tokens(), None),
+                        // Neither
                         (None, None, _) => continue,
                     };
 
-                    previous_totals = next_totals;
-
-                    // Skip empty deltas
+                    // Skip zero-token snapshots without advancing the baseline so
+                    // that post-compaction zero totals don't inflate later deltas.
                     if tokens.input == 0
                         && tokens.output == 0
                         && tokens.cache_read == 0
@@ -248,6 +283,8 @@ pub fn parse_codex_file(path: &Path) -> Vec<UnifiedMessage> {
                     {
                         continue;
                     }
+
+                    previous_totals = next_totals;
 
                     let timestamp = entry
                         .timestamp
@@ -258,13 +295,15 @@ pub fn parse_codex_file(path: &Path) -> Vec<UnifiedMessage> {
                     let agent = if session_is_headless {
                         Some("headless".to_string())
                     } else {
-                        None
+                        session_agent.clone()
                     };
+
+                    let provider = session_provider.as_deref().unwrap_or("openai");
 
                     messages.push(UnifiedMessage::new_with_agent(
                         "codex",
                         model,
-                        "openai",
+                        provider,
                         session_id.clone(),
                         timestamp,
                         tokens,
@@ -301,8 +340,10 @@ pub fn parse_codex_file(path: &Path) -> Vec<UnifiedMessage> {
 
 fn extract_model(payload: &CodexPayload) -> Option<String> {
     payload
-        .model
-        .clone()
+        .model_info
+        .as_ref()
+        .and_then(|mi| mi.slug.clone())
+        .or(payload.model.clone())
         .or(payload.model_name.clone())
         .or(payload.info.as_ref().and_then(|i| i.model.clone()))
         .or(payload.info.as_ref().and_then(|i| i.model_name.clone()))
@@ -626,9 +667,11 @@ mod tests {
         assert_eq!(messages[1].tokens.cache_read, 2);
         assert_eq!(messages[1].tokens.reasoning, 1);
 
+        // Stale snapshot (line4) is now skipped entirely; messages[2]
+        // comes from line5's last_token_usage instead.
         assert_eq!(messages[2].tokens.input, 8);
-        assert_eq!(messages[2].tokens.output, 2);
-        assert_eq!(messages[2].tokens.cache_read, 1);
+        assert_eq!(messages[2].tokens.output, 3);
+        assert_eq!(messages[2].tokens.cache_read, 2);
         assert_eq!(messages[2].tokens.reasoning, 0);
     }
 
@@ -648,13 +691,17 @@ mod tests {
 
         let messages = parse_codex_file(file.path());
 
+        // Stale line4 is skipped; messages come from lines 2, 3, 5, 6.
         assert_eq!(messages.len(), 4);
         assert_eq!(messages[0].tokens.input, 80);
         assert_eq!(messages[1].tokens.input, 8);
         assert_eq!(messages[2].tokens.input, 8);
+        assert_eq!(messages[2].tokens.output, 2);
+        assert_eq!(messages[2].tokens.cache_read, 1);
+        assert_eq!(messages[2].tokens.reasoning, 0);
         assert_eq!(messages[3].tokens.input, 8);
-        assert_eq!(messages[3].tokens.output, 2);
-        assert_eq!(messages[3].tokens.cache_read, 1);
+        assert_eq!(messages[3].tokens.output, 3);
+        assert_eq!(messages[3].tokens.cache_read, 2);
         assert_eq!(messages[3].tokens.reasoning, 0);
     }
 
@@ -684,5 +731,106 @@ mod tests {
         assert_eq!(messages[2].tokens.output, 4);
         assert_eq!(messages[2].tokens.cache_read, 5);
         assert_eq!(messages[2].tokens.reasoning, 1);
+    }
+
+    #[test]
+    fn test_first_event_uses_last_not_total_for_resumed_sessions() {
+        let line1 = r#"{"timestamp":"2026-01-01T00:00:00Z","type":"turn_context","payload":{"model":"gpt-5.2"}}"#;
+        let line2 = r#"{"timestamp":"2026-01-01T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5000,"cached_input_tokens":500,"output_tokens":800,"reasoning_output_tokens":100},"last_token_usage":{"input_tokens":12,"cached_input_tokens":2,"output_tokens":5,"reasoning_output_tokens":1}}}}"#;
+        let line3 = r#"{"timestamp":"2026-01-01T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5012,"cached_input_tokens":502,"output_tokens":805,"reasoning_output_tokens":101},"last_token_usage":{"input_tokens":12,"cached_input_tokens":2,"output_tokens":5,"reasoning_output_tokens":1}}}}"#;
+        let content = format!("{}\n{}\n{}", line1, line2, line3);
+        let file = create_test_file(&content);
+
+        let messages = parse_codex_file(file.path());
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].tokens.input, 10);
+        assert_eq!(messages[0].tokens.output, 5);
+        assert_eq!(messages[0].tokens.cache_read, 2);
+        assert_eq!(messages[0].tokens.reasoning, 1);
+        assert_eq!(messages[1].tokens.input, 10);
+        assert_eq!(messages[1].tokens.output, 5);
+        assert_eq!(messages[1].tokens.cache_read, 2);
+        assert_eq!(messages[1].tokens.reasoning, 1);
+    }
+
+    #[test]
+    fn test_zero_token_snapshot_does_not_inflate_later_deltas() {
+        let line1 = r#"{"timestamp":"2026-01-01T00:00:00Z","type":"turn_context","payload":{"model":"gpt-5.2"}}"#;
+        let line2 = r#"{"timestamp":"2026-01-01T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"cached_input_tokens":50,"output_tokens":80,"reasoning_output_tokens":10},"last_token_usage":{"input_tokens":500,"cached_input_tokens":50,"output_tokens":80,"reasoning_output_tokens":10}}}}"#;
+        let line3 = r#"{"timestamp":"2026-01-01T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0},"last_token_usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0}}}}"#;
+        let line4 = r#"{"timestamp":"2026-01-01T00:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":510,"cached_input_tokens":52,"output_tokens":83,"reasoning_output_tokens":11},"last_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1}}}}"#;
+        let content = format!("{}\n{}\n{}\n{}", line1, line2, line3, line4);
+        let file = create_test_file(&content);
+
+        let messages = parse_codex_file(file.path());
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].tokens.input, 450);
+        assert_eq!(messages[0].tokens.output, 80);
+        assert_eq!(messages[0].tokens.cache_read, 50);
+        assert_eq!(messages[0].tokens.reasoning, 10);
+        assert_eq!(messages[1].tokens.input, 8);
+        assert_eq!(messages[1].tokens.output, 3);
+        assert_eq!(messages[1].tokens.cache_read, 2);
+        assert_eq!(messages[1].tokens.reasoning, 1);
+    }
+
+    #[test]
+    fn test_model_info_slug_from_turn_context() {
+        let line1 = r#"{"timestamp":"2026-01-01T00:00:00Z","type":"turn_context","payload":{"model_info":{"slug":"o3-pro"}}}"#;
+        let line2 = r#"{"timestamp":"2026-01-01T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1},"last_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1}}}}"#;
+        let content = format!("{}\n{}", line1, line2);
+        let file = create_test_file(&content);
+
+        let messages = parse_codex_file(file.path());
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].model_id, "o3-pro");
+    }
+
+    #[test]
+    fn test_session_meta_provider_and_agent() {
+        let line1 = r#"{"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"source":"interactive","model_provider":"azure","agent_nickname":"my-agent"}}"#;
+        let line2 = r#"{"timestamp":"2026-01-01T00:00:01Z","type":"turn_context","payload":{"model":"gpt-5.2"}}"#;
+        let line3 = r#"{"timestamp":"2026-01-01T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1},"last_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1}}}}"#;
+        let content = format!("{}\n{}\n{}", line1, line2, line3);
+        let file = create_test_file(&content);
+
+        let messages = parse_codex_file(file.path());
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].provider_id, "azure");
+        assert_eq!(messages[0].agent.as_deref(), Some("my-agent"));
+    }
+
+    #[test]
+    fn test_cached_tokens_takes_max_of_both_fields() {
+        let usage = CodexTokenUsage {
+            input_tokens: Some(100),
+            output_tokens: Some(30),
+            cached_input_tokens: Some(10),
+            cache_read_input_tokens: Some(20),
+            reasoning_output_tokens: Some(5),
+        };
+        let totals = CodexTotals::from_usage(&usage);
+        assert_eq!(totals.cached, 20);
+    }
+
+    #[test]
+    fn test_compaction_total_drop_uses_last_as_increment() {
+        let line1 = r#"{"timestamp":"2026-01-01T00:00:00Z","type":"turn_context","payload":{"model":"gpt-5.2"}}"#;
+        let line2 = r#"{"timestamp":"2026-01-01T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150000,"cached_input_tokens":10000,"output_tokens":20000,"reasoning_output_tokens":5000},"last_token_usage":{"input_tokens":150000,"cached_input_tokens":10000,"output_tokens":20000,"reasoning_output_tokens":5000}}}}"#;
+        let line3 = r#"{"timestamp":"2026-01-01T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":200000,"cached_input_tokens":15000,"output_tokens":25000,"reasoning_output_tokens":6000},"last_token_usage":{"input_tokens":50,"cached_input_tokens":5,"output_tokens":10,"reasoning_output_tokens":2}}}}"#;
+        let content = format!("{}\n{}\n{}", line1, line2, line3);
+        let file = create_test_file(&content);
+
+        let messages = parse_codex_file(file.path());
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].tokens.input, 45);
+        assert_eq!(messages[1].tokens.output, 10);
+        assert_eq!(messages[1].tokens.cache_read, 5);
+        assert_eq!(messages[1].tokens.reasoning, 2);
     }
 }
