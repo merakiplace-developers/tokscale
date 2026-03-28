@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import {
   exchangeCodeForToken,
-  getGitHubUser,
-  getGitHubUserEmail,
-  checkOrgMembership,
-} from "@/lib/auth/github";
+  getGoogleUser,
+  getAllowedDomain,
+} from "@/lib/auth/google";
 import { createSession, setSessionCookie } from "@/lib/auth/session";
 import { db, users } from "@/lib/db";
 import { eq } from "drizzle-orm";
+import { deriveUniqueUsername } from "@/lib/auth/utils";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -18,9 +18,8 @@ export async function GET(request: Request) {
 
   const baseUrl = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
 
-  // Handle OAuth errors
   if (error) {
-    console.error("GitHub OAuth error:", error);
+    console.error("Google OAuth error:", error);
     return NextResponse.redirect(`${baseUrl}/?error=oauth_error`);
   }
 
@@ -47,52 +46,50 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${baseUrl}/?error=state_mismatch`);
   }
 
-  // Clear the state cookie
   cookieStore.delete("oauth_state");
 
   try {
-    // Exchange code for access token
     const accessToken = await exchangeCodeForToken(code);
+    const googleUser = await getGoogleUser(accessToken);
 
-    // Fetch user info from GitHub
-    const githubUser = await getGitHubUser(accessToken);
-
-    // Enforce org restriction if configured
-    const isMember = await checkOrgMembership(accessToken);
-    if (!isMember) {
-      return NextResponse.redirect(`${baseUrl}/?error=org_not_allowed`);
+    // Require verified email
+    if (!googleUser.email_verified) {
+      return NextResponse.redirect(`${baseUrl}/?error=email_not_verified`);
     }
 
-    const email = githubUser.email || (await getGitHubUserEmail(accessToken));
+    // Enforce domain restriction if configured
+    const allowedDomain = getAllowedDomain();
+    if (allowedDomain && googleUser.hd !== allowedDomain) {
+      return NextResponse.redirect(`${baseUrl}/?error=domain_not_allowed`);
+    }
 
-    // Account resolution: githubId → email (linking) → new user
+    // Account resolution: googleId → email → new user
     let userId: string;
 
-    // 1. Look up by GitHub ID
-    const existingByGithubId = await db
+    // 1. Look up by Google ID
+    const existingByGoogleId = await db
       .select()
       .from(users)
-      .where(eq(users.githubId, githubUser.id))
+      .where(eq(users.googleId, googleUser.sub))
       .limit(1);
 
-    if (existingByGithubId.length > 0) {
-      userId = existingByGithubId[0].id;
+    if (existingByGoogleId.length > 0) {
+      userId = existingByGoogleId[0].id;
       await db
         .update(users)
         .set({
-          username: githubUser.login,
-          displayName: githubUser.name,
-          avatarUrl: githubUser.avatar_url,
-          email: email,
+          displayName: googleUser.name,
+          avatarUrl: googleUser.picture,
+          email: googleUser.email,
           updatedAt: new Date(),
         })
         .where(eq(users.id, userId));
-    } else if (email) {
-      // 2. Look up by email (account linking with Google users)
+    } else {
+      // 2. Look up by email (account linking)
       const existingByEmail = await db
         .select()
         .from(users)
-        .where(eq(users.email, email))
+        .where(eq(users.email, googleUser.email))
         .limit(1);
 
       if (existingByEmail.length > 0) {
@@ -100,58 +97,41 @@ export async function GET(request: Request) {
         await db
           .update(users)
           .set({
-            githubId: githubUser.id,
-            username: githubUser.login,
-            displayName: githubUser.name,
-            avatarUrl: githubUser.avatar_url,
+            googleId: googleUser.sub,
+            displayName: googleUser.name,
+            avatarUrl: googleUser.picture,
             updatedAt: new Date(),
           })
           .where(eq(users.id, userId));
       } else {
         // 3. Create new user
+        const username = await deriveUniqueUsername(googleUser.email);
         const [newUser] = await db
           .insert(users)
           .values({
-            githubId: githubUser.id,
-            username: githubUser.login,
-            displayName: githubUser.name,
-            avatarUrl: githubUser.avatar_url,
-            email: email,
+            googleId: googleUser.sub,
+            username,
+            displayName: googleUser.name,
+            avatarUrl: googleUser.picture,
+            email: googleUser.email,
           })
           .returning({ id: users.id });
 
         userId = newUser.id;
       }
-    } else {
-      // No email available, create new user without linking
-      const [newUser] = await db
-        .insert(users)
-        .values({
-          githubId: githubUser.id,
-          username: githubUser.login,
-          displayName: githubUser.name,
-          avatarUrl: githubUser.avatar_url,
-          email: email,
-        })
-        .returning({ id: users.id });
-
-      userId = newUser.id;
     }
 
-    // Create session
     const sessionToken = await createSession(userId, {
       source: "web",
       userAgent: request.headers.get("user-agent") || undefined,
     });
 
-    // Set session cookie
     await setSessionCookie(sessionToken);
 
-    // Redirect to return URL
     const returnTo = storedState.returnTo || "/leaderboard";
     return NextResponse.redirect(`${baseUrl}${returnTo}`);
   } catch (err) {
-    console.error("GitHub OAuth callback error:", err);
+    console.error("Google OAuth callback error:", err);
     return NextResponse.redirect(`${baseUrl}/leaderboard?error=auth_failed`);
   }
 }

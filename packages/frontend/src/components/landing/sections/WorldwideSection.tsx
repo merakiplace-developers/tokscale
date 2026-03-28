@@ -151,10 +151,7 @@ export function WorldwideSection({
                         #{user.rank}
                       </RankBadge>
                       <UserAvatar
-                        src={
-                          user.avatarUrl ||
-                          `https://github.com/${user.username}.png`
-                        }
+                        src={user.avatarUrl || "/default-avatar.svg"}
                         alt={user.displayName || user.username}
                         width={32}
                         height={32}

@@ -611,7 +611,7 @@ function UserMenu({ user, onSignOut }: { user: User; onSignOut: () => void }) {
         onClick={() => setIsOpen((v) => !v)}
       >
         <AvatarImg
-          src={user.avatarUrl || `https://github.com/${user.username}.png`}
+          src={user.avatarUrl || "/default-avatar.svg"}
           alt={user.username}
           width={32}
           height={32}
@@ -722,11 +722,11 @@ export function Navigation() {
               window.location.href = "/leaderboard";
             }} />
           ) : (
-            <SignInButton href="/api/auth/github" aria-label="Sign in with GitHub">
+            <SignInButton href="/login" aria-label="Sign in">
               <SignInIcon>
                 <GitHubIcon />
               </SignInIcon>
-              <SignInTextFull>Sign in with GitHub</SignInTextFull>
+              <SignInTextFull>Sign in</SignInTextFull>
               <SignInTextCompact>Sign in</SignInTextCompact>
             </SignInButton>
           )}
@@ -761,7 +761,7 @@ export function Navigation() {
             <>
               <DropdownUserCard>
                 <AvatarImg
-                  src={user.avatarUrl || `https://github.com/${user.username}.png`}
+                  src={user.avatarUrl || "/default-avatar.svg"}
                   alt={user.username}
                   width={32}
                   height={32}
@@ -793,11 +793,11 @@ export function Navigation() {
               </DropdownSignOutButton>
             </>
           ) : (
-            <DropdownSignInButton href="/api/auth/github">
+            <DropdownSignInButton href="/login">
               <SignInIcon>
                 <GitHubIcon />
               </SignInIcon>
-              <DropdownSignInText>Sign in with GitHub</DropdownSignInText>
+              <DropdownSignInText>Sign in</DropdownSignInText>
             </DropdownSignInButton>
           )}
         </MobileDropdown>

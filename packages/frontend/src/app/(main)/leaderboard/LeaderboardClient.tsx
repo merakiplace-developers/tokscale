@@ -806,7 +806,7 @@ const LeaderboardRow = memo(function LeaderboardRow({
       <TableCell>
         <UserContainer>
           <img
-            src={user.avatarUrl || `https://github.com/${user.username}.png`}
+            src={user.avatarUrl || "/default-avatar.svg"}
             alt={user.username}
             width={40}
             height={40}
@@ -1012,7 +1012,7 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
         <CurrentUserCard>
           <CurrentUserInfo>
             <img
-              src={currentUser.avatarUrl || `https://github.com/${currentUser.username}.png`}
+              src={currentUser.avatarUrl || "/default-avatar.svg"}
               alt={currentUser.username}
               width={48}
               height={48}

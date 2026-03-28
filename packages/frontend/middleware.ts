@@ -21,7 +21,7 @@ export function middleware(request: NextRequest) {
 
   if (!sessionToken) {
     // Redirect to login
-    const loginUrl = new URL("/api/auth/github", request.url);
+    const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("returnTo", pathname);
     return NextResponse.redirect(loginUrl);
   }

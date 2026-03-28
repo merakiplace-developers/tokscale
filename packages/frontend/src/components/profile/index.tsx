@@ -334,7 +334,7 @@ const ActionText = styled.span`
 
 export function ProfileHeader({ user, stats, lastUpdated }: ProfileHeaderProps) {
   const [isEmbedDialogOpen, setIsEmbedDialogOpen] = useState(false);
-  const avatarUrl = user.avatarUrl || `https://github.com/${user.username}.png`;
+  const avatarUrl = user.avatarUrl || "/default-avatar.svg";
 
   const handleShareClick = async () => {
     try {

@@ -171,7 +171,7 @@ export default function SettingsClient() {
       .then((res) => res.json())
       .then((data) => {
         if (!data.user) {
-          router.push("/api/auth/github?returnTo=/settings");
+          router.push("/login?returnTo=/settings");
           return;
         }
         setUser(data.user);
@@ -240,7 +240,7 @@ export default function SettingsClient() {
           </SectionTitle>
           <ProfileWrapper>
             <AvatarImg
-              src={user.avatarUrl || `https://github.com/${user.username}.png`}
+              src={user.avatarUrl || "/default-avatar.svg"}
               alt={user.username}
               width={64}
               height={64}
@@ -260,7 +260,7 @@ export default function SettingsClient() {
             </div>
           </ProfileWrapper>
           <InfoBanner style={{ marginTop: 16 }}>
-            Profile information is synced from GitHub and cannot be edited here.
+            Profile information is synced from your login provider and cannot be edited here.
           </InfoBanner>
         </Section>
 

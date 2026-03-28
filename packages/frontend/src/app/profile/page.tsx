@@ -7,6 +7,6 @@ export default async function ProfilePage() {
   if (session) {
     redirect(`/u/${session.username}`);
   } else {
-    redirect("/api/auth/github");
+    redirect("/login");
   }
 }
