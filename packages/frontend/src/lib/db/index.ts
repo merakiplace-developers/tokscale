@@ -24,7 +24,11 @@ function createDb() {
       // Each Vercel function instance gets its own pool. With dozens of
       // concurrent cold-starts, max:5 per instance quickly exceeds the
       // database server's max_connections (error 53300).
-      max: 1,
+      //
+      // Override with DB_POOL_MAX for build or local environments where
+      // concurrent queries on a single connection can cause hangs with
+      // Supabase Transaction Mode Pooler.
+      max: parseInt(process.env.DB_POOL_MAX || "1", 10),
 
       // Close idle connections after 20 s so they don't linger between
       // infrequent invocations.
