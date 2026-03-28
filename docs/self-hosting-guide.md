@@ -18,7 +18,7 @@ Vercel + Supabase 를 사용하여 팀 전용 tokscale 리더보드를 구성하
                                  ▼
                           ┌──────────────┐
                           │ GitHub OAuth  │
-                          │ App (팀 전용) │
+                          │ Google OAuth  │
                           └──────────────┘
 ```
 
@@ -57,19 +57,28 @@ Vercel Serverless 함수는 요청마다 새 커넥션을 열 수 있습니다. 
 
 ---
 
-## Step 2: GitHub OAuth App 생성
+## Step 2: OAuth 설정 (GitHub + Google)
 
-1. https://github.com/settings/developers 이동
-2. **OAuth Apps → New OAuth App** 클릭
-3. 설정:
+로그인은 GitHub과 Google Workspace 중 하나 또는 둘 다 지원합니다. 같은 이메일이면 자동으로 동일 계정으로 연결됩니다.
+
+### 2-1. GitHub OAuth App
+
+1. https://github.com/settings/developers → **OAuth Apps → New OAuth App**
+2. 설정:
    - **Application name**: `Tokscale Team Leaderboard`
    - **Homepage URL**: `https://your-project.vercel.app` (나중에 수정 가능)
    - **Authorization callback URL**: `https://your-project.vercel.app/api/auth/github/callback`
-4. **Register application** 클릭
-5. **Client ID** 복사
-6. **Generate a new client secret** → **Client Secret** 복사
+3. **Client ID** 및 **Client Secret** 복사
 
-> 배포 후 Vercel 도메인이 확정되면 URL을 업데이트하세요.
+### 2-2. Google OAuth (선택사항)
+
+1. https://console.cloud.google.com → **APIs & Services → Credentials**
+2. **Create Credentials → OAuth 2.0 Client ID** (Web application)
+3. **Authorized redirect URI**: `https://your-project.vercel.app/api/auth/google/callback`
+4. **Client ID** 및 **Client Secret** 복사
+5. **OAuth consent screen**: Workspace 조직 내부 전용이면 `Internal`로 설정
+
+> 배포 후 Vercel 도메인이 확정되면 callback URL을 업데이트하세요.
 
 ---
 
@@ -111,8 +120,12 @@ git init && git add . && git commit -m "init: tokscale team leaderboard"
    | Key | Value | 비고 |
    |-----|-------|------|
    | `DATABASE_URL` | `postgresql://postgres.[ref]:[pw]@...pooler.supabase.com:6543/postgres` | Supabase Pooler URI |
-   | `GITHUB_CLIENT_ID` | Step 2에서 복사한 Client ID | |
-   | `GITHUB_CLIENT_SECRET` | Step 2에서 복사한 Client Secret | |
+   | `GITHUB_CLIENT_ID` | Step 2-1에서 복사한 Client ID | |
+   | `GITHUB_CLIENT_SECRET` | Step 2-1에서 복사한 Client Secret | |
+   | `GITHUB_ALLOWED_ORG` | `your-org-name` | 선택: 특정 GitHub 조직 멤버만 허용 |
+   | `GOOGLE_CLIENT_ID` | Step 2-2에서 복사한 Client ID | 선택: Google 로그인 사용 시 |
+   | `GOOGLE_CLIENT_SECRET` | Step 2-2에서 복사한 Client Secret | 선택: Google 로그인 사용 시 |
+   | `GOOGLE_ALLOWED_DOMAIN` | `your-company.com` | 선택: 특정 Workspace 도메인만 허용 |
    | `NEXT_PUBLIC_URL` | `https://your-project.vercel.app` | 배포 후 확정되면 수정 |
    | `AUTH_SECRET` | 랜덤 문자열 (32자 이상) | `openssl rand -hex 32` 로 생성 |
 
@@ -152,9 +165,9 @@ SELECT tablename FROM pg_tables WHERE schemaname = 'public';
 
 1. Vercel 배포 완료 후 할당된 URL 확인 (예: `tokscale-team.vercel.app`)
 2. **Vercel**: Environment Variables에서 `NEXT_PUBLIC_URL` 업데이트 → Redeploy
-3. **GitHub OAuth App**: Homepage URL과 Callback URL 업데이트:
-   - Homepage: `https://tokscale-team.vercel.app`
-   - Callback: `https://tokscale-team.vercel.app/api/auth/github/callback`
+3. **OAuth App callback URL 업데이트**:
+   - GitHub: `https://tokscale-team.vercel.app/api/auth/github/callback`
+   - Google: `https://tokscale-team.vercel.app/api/auth/google/callback`
 
 ---
 
@@ -181,7 +194,7 @@ source ~/.zshrc
 tokscale login
 ```
 
-브라우저가 열리면 팀 전용 인스턴스의 GitHub OAuth로 인증합니다.
+브라우저가 열리면 GitHub 또는 Google 중 원하는 방법으로 로그인합니다.
 
 > **주의**: 기존 공개 리더보드(`tokscale.ai`)와 별개의 인증입니다. `TOKSCALE_API_URL`이 설정된 동안에는 팀 인스턴스로만 로그인/제출됩니다.
 
@@ -213,7 +226,7 @@ tokscale-team submit     # 팀 전용 리더보드
 1. Vercel Dashboard → **Settings → Domains**
 2. 커스텀 도메인 추가 (예: `leaderboard.yourteam.com`)
 3. DNS 레코드 설정 (Vercel이 안내하는 CNAME 레코드 추가)
-4. `NEXT_PUBLIC_URL`과 GitHub OAuth URL을 커스텀 도메인으로 업데이트
+4. `NEXT_PUBLIC_URL`과 OAuth callback URL들을 커스텀 도메인으로 업데이트
 
 ---
 
@@ -466,7 +479,9 @@ Error: connect ECONNREFUSED
 ```
 Error: redirect_uri_mismatch
 ```
-- GitHub OAuth App의 callback URL이 정확히 `https://[your-domain]/api/auth/github/callback` 인지 확인
+- 각 OAuth App의 callback URL이 정확한지 확인:
+  - GitHub: `https://[your-domain]/api/auth/github/callback`
+  - Google: `https://[your-domain]/api/auth/google/callback`
 - `NEXT_PUBLIC_URL` 환경변수와 일치하는지 확인
 
 ### CLI 로그인 시 기존 인스턴스로 연결됨
