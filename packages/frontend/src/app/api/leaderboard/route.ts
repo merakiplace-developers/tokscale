@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { getLeaderboardData } from "@/lib/leaderboard/getLeaderboard";
 import type { Period, SortBy } from "@/lib/leaderboard/types";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 const VALID_PERIODS: Period[] = ["all", "month", "week"];
 const VALID_SORT_BY: SortBy[] = ["tokens", "cost"];
@@ -13,9 +13,9 @@ function parseIntSafe(value: string | null, defaultValue: number): number {
   return Number.isFinite(parsed) ? Math.floor(parsed) : defaultValue;
 }
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
+    const searchParams = request.nextUrl.searchParams;
 
     const periodParam = searchParams.get("period") || "all";
     const period: Period = VALID_PERIODS.includes(periodParam as Period)
