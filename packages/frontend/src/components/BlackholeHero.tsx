@@ -5,12 +5,15 @@ import Image from "next/image";
 import Link from "next/link";
 import styled from "styled-components";
 import heroBg from "@/../public/assets/hero-bg.png";
+import { getSelfHostedUrl } from "@/lib/selfHosted";
 
 export function BlackholeHero() {
   const [copied, setCopied] = useState(false);
+  const selfHostedUrl = getSelfHostedUrl();
+  const envPrefix = selfHostedUrl ? `TOKSCALE_API_URL=${selfHostedUrl} ` : "";
 
   const handleCopy = () => {
-    navigator.clipboard.writeText("bunx tokscale");
+    navigator.clipboard.writeText(`${envPrefix}bunx tokscale`);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -55,6 +58,7 @@ export function BlackholeHero() {
           
           <CommandDisplay>
             <CommandTextWrapper>
+              {selfHostedUrl && <EnvVarText>TOKSCALE_API_URL={selfHostedUrl}&nbsp;</EnvVarText>}
               <CommandPrefix>
                 bunx&nbsp;
               </CommandPrefix>
@@ -258,18 +262,24 @@ const CommandDisplay = styled.div`
   display: flex;
   align-items: center;
   position: relative;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  &::-webkit-scrollbar { display: none; }
+  -ms-overflow-style: none;
+  scrollbar-width: none;
   height: 36px;
   background-color: #141A21;
   border-radius: 0.5rem;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
   padding-left: 0.75rem;
   padding-right: 0.75rem;
-  width: 190px;
+  width: fit-content;
+  min-width: 190px;
 
   @media (max-width: 400px) {
     height: 32px;
-    width: 170px;
+    min-width: 170px;
     padding-left: 0.625rem;
     padding-right: 0.625rem;
   }
@@ -279,6 +289,20 @@ const CommandTextWrapper = styled.div`
   z-index: 10;
   display: flex;
   align-items: center;
+  white-space: nowrap;
+`;
+
+const EnvVarText = styled.span`
+  color: #4B6486;
+  font-family: "Inconsolata", monospace !important;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 94%;
+  letter-spacing: -0.8px;
+
+  @media (max-width: 400px) {
+    font-size: 14px;
+  }
 `;
 
 const CommandPrefix = styled.span`
