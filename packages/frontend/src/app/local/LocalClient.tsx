@@ -6,7 +6,6 @@ import type { TokenContributionData } from "@/lib/types";
 import { DataInput } from "@/components/DataInput";
 import { GraphContainer } from "@/components/GraphContainer";
 import { Navigation } from "@/components/layout/Navigation";
-import { Footer } from "@/components/layout/Footer";
 
 const Container = styled.div`
   min-height: 100vh;
@@ -133,8 +132,6 @@ export default function LocalClient() {
           </ContentWrapper>
         )}
       </Main>
-
-      <Footer />
     </Container>
   );
 }

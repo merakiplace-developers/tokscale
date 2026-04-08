@@ -3,7 +3,6 @@
 import { useState, useMemo } from "react";
 import styled from "styled-components";
 import { Navigation } from "@/components/layout/Navigation";
-import { Footer } from "@/components/layout/Footer";
 import {
   ProfileHeader,
   ProfileTabBar,
@@ -184,7 +183,6 @@ const EARLY_ADOPTERS = ["code-yeongyu", "gtg7784", "qodot"];
         </ContentWrapper>
       </MainContent>
 
-      <Footer />
     </PageContainer>
   );
 }

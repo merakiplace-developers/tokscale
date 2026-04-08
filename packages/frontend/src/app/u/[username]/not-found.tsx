@@ -3,7 +3,6 @@
 import Link from "next/link";
 import styled from "styled-components";
 import { Navigation } from "@/components/layout/Navigation";
-import { Footer } from "@/components/layout/Footer";
 
 const Container = styled.div`
   min-height: 100vh;
@@ -68,7 +67,6 @@ export default function ProfileNotFound() {
           </BackButton>
         </ContentWrapper>
       </Main>
-      <Footer />
     </Container>
   );
 }

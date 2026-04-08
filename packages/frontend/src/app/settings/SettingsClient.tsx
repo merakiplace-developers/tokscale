@@ -5,7 +5,6 @@ import { useRouter } from "nextjs-toploader/app";
 import styled from "styled-components";
 import { KeyIcon } from "@/components/ui/Icons";
 import { Navigation } from "@/components/layout/Navigation";
-import { Footer } from "@/components/layout/Footer";
 
 interface User {
   id: string;
@@ -32,7 +31,7 @@ const MainContent = styled.main`
   flex: 1;
   max-width: 768px;
   margin: 0 auto;
-  padding: 40px 24px;
+  padding: 80px 24px 40px;
   width: 100%;
 `;
 
@@ -41,6 +40,7 @@ const LoadingMain = styled.main`
   display: flex;
   align-items: center;
   justify-content: center;
+  padding-top: 80px;
 `;
 
 const Title = styled.h1`
@@ -214,7 +214,7 @@ export default function SettingsClient() {
         <LoadingMain>
           <div style={{ color: "var(--color-fg-muted)" }}>Loading...</div>
         </LoadingMain>
-        <Footer />
+
       </PageWrapper>
     );
   }

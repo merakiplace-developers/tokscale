@@ -2,8 +2,6 @@ import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { Navigation } from "@/components/layout/Navigation";
-import { Footer } from "@/components/layout/Footer";
-import { BlackholeHero } from "@/components/BlackholeHero";
 import { LeaderboardSkeleton } from "@/components/Skeleton";
 import { getLeaderboardData, getUserRank } from "@/lib/leaderboard/getLeaderboard";
 import type { SortBy } from "@/lib/leaderboard/types";
@@ -27,14 +25,11 @@ export default async function LeaderboardPage() {
     >
       <Navigation />
 
-      <main className="main-container">
-        <BlackholeHero />
+      <main className="main-container" style={{ paddingTop: 80 }}>
         <Suspense fallback={<LeaderboardSkeleton />}>
           <LeaderboardWithPreferences />
         </Suspense>
       </main>
-
-      <Footer />
     </div>
   );
 }
