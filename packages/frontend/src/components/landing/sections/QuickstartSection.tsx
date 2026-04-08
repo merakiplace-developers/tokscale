@@ -101,7 +101,7 @@ export function QuickstartSection() {
               <CardTitle>
                 Submit DATA
                 <br />
-                to the Global Leaderboard
+                to the Leaderboard
               </CardTitle>
               <CommandBox>
                 <CommandInputArea>
@@ -283,15 +283,15 @@ const CommandInputArea = styled.div`
 const CommandText = styled.span`
   font-family: "Inconsolata", monospace !important;
   font-weight: 700;
-  font-size: 16px;
+  font-size: 11px;
   line-height: 0.94em;
-  letter-spacing: -0.05em;
+  letter-spacing: -0.03em;
   text-align: center;
   color: #9ad7ed;
   white-space: nowrap;
 
   @media (max-width: 480px) {
-    font-size: 14px;
+    font-size: 10px;
   }
 `;
 
