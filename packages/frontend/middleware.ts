@@ -8,7 +8,7 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Check if route is protected
-  const isProtected = PROTECTED_ROUTES.some((route) =>
+  const isProtected = pathname === "/" || PROTECTED_ROUTES.some((route) =>
     pathname.startsWith(route)
   );
 
@@ -33,5 +33,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/settings/:path*", "/leaderboard/:path*"],
+  matcher: ["/", "/settings/:path*", "/leaderboard/:path*"],
 };
