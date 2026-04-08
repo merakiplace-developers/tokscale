@@ -701,15 +701,6 @@ export function Navigation() {
           <NavItemLink href="/profile" $isActive={pathname === "/profile" || pathname.startsWith("/u/")}>
             Profile
           </NavItemLink>
-          <NavItemBase
-            as="a"
-            href="https://github.com/merakiplace-developers/tokscale"
-            target="_blank"
-            rel="noopener noreferrer"
-            $isActive={false}
-          >
-            GitHub
-          </NavItemBase>
         </DesktopNavItems>
 
         <DesktopAuthSection>
@@ -721,15 +712,7 @@ export function Navigation() {
               setUser(null);
               window.location.href = "/leaderboard";
             }} />
-          ) : (
-            <SignInButton href="/login" aria-label="Sign in">
-              <SignInIcon>
-                <GitHubIcon />
-              </SignInIcon>
-              <SignInTextFull>Sign in</SignInTextFull>
-              <SignInTextCompact>Sign in</SignInTextCompact>
-            </SignInButton>
-          )}
+          ) : null}
         </DesktopAuthSection>
       </NavHeaderRow>
 
@@ -745,16 +728,6 @@ export function Navigation() {
           <DropdownNavLink href="/profile" $isActive={pathname === "/profile" || pathname.startsWith("/u/")} onClick={closeMobileMenu}>
             Profile
           </DropdownNavLink>
-          <DropdownNavLinkExternal
-            href="https://github.com/merakiplace-developers/tokscale"
-            target="_blank"
-            rel="noopener noreferrer"
-            $isActive={false}
-            onClick={closeMobileMenu}
-          >
-            GitHub ↗
-          </DropdownNavLinkExternal>
-
           <DropdownDivider />
 
           {isLoading ? null : user ? (
@@ -792,14 +765,7 @@ export function Navigation() {
                 Sign Out
               </DropdownSignOutButton>
             </>
-          ) : (
-            <DropdownSignInButton href="/login">
-              <SignInIcon>
-                <GitHubIcon />
-              </SignInIcon>
-              <DropdownSignInText>Sign in</DropdownSignInText>
-            </DropdownSignInButton>
-          )}
+          ) : null}
         </MobileDropdown>
       </MobileDropdownWrapper>
     </NavContainer>
