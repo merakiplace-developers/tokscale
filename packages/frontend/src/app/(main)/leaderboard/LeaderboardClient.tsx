@@ -9,6 +9,7 @@ import { LeaderboardSkeleton } from "@/components/Skeleton";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { useSettings } from "@/lib/useSettings";
 import { Switch } from "@/components/Switch";
+import { getSelfHostedUrl } from "@/lib/selfHosted";
 
 const Section = styled.div`
   margin-bottom: 40px;
@@ -476,6 +477,9 @@ const CodeLine = styled.div`
   font-weight: 500;
   letter-spacing: -0.8px;
   background-color: var(--color-bg-subtle);
+  overflow-x: auto;
+  &::-webkit-scrollbar { display: none; }
+  scrollbar-width: none;
 
   * {
     font-family: "Inconsolata", monospace !important;
@@ -485,6 +489,12 @@ const CodeLine = styled.div`
 const CommandPrompt = styled.span`
   color: #4B6486;
   margin-right: 8px;
+`;
+
+const EnvVarPrefix = styled.span`
+  color: #4B6486;
+  font-size: 13px;
+  white-space: nowrap;
 `;
 
 const CommandPrefix = styled.span`
@@ -849,6 +859,8 @@ const LeaderboardRow = memo(function LeaderboardRow({
 
 export default function LeaderboardClient({ initialData, currentUser, initialSortBy, initialUserRank }: LeaderboardClientProps) {
   const router = useRouter();
+  const selfHostedUrl = getSelfHostedUrl();
+  const envPrefix = selfHostedUrl ? `TOKSCALE_API_URL=${selfHostedUrl} ` : "";
   const [data, setData] = useState<LeaderboardData>(initialData);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1095,7 +1107,7 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
             <EmptyState>
               <EmptyMessage>No submissions yet. Be the first!</EmptyMessage>
               <EmptyHint>
-                Run <CodeSnippet>tokscale login && tokscale submit</CodeSnippet>
+                Run <CodeSnippet>{envPrefix}tokscale login && {envPrefix}tokscale submit</CodeSnippet>
               </EmptyHint>
             </EmptyState>
           ) : (
@@ -1193,28 +1205,30 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
         <CodeBlock>
           <CodeLine>
             <CommandPrompt>$</CommandPrompt>
+            {selfHostedUrl && <EnvVarPrefix>TOKSCALE_API_URL={selfHostedUrl}{" "}</EnvVarPrefix>}
             <CommandPrefix>bunx</CommandPrefix>
             <CommandName>tokscale</CommandName>
             <CommandArg>login</CommandArg>
             <CopyIconButton
-              onClick={() => handleCopyCommand("bunx tokscale login")}
-              className={copiedCommand === "bunx tokscale login" ? "copied" : ""}
+              onClick={() => handleCopyCommand(`${envPrefix}bunx tokscale login`)}
+              className={copiedCommand === `${envPrefix}bunx tokscale login` ? "copied" : ""}
               aria-label="Copy command"
             >
-              {copiedCommand === "bunx tokscale login" ? <CheckIcon size={16} /> : <CopyIcon size={16} />}
+              {copiedCommand === `${envPrefix}bunx tokscale login` ? <CheckIcon size={16} /> : <CopyIcon size={16} />}
             </CopyIconButton>
           </CodeLine>
           <CodeLine>
             <CommandPrompt>$</CommandPrompt>
+            {selfHostedUrl && <EnvVarPrefix>TOKSCALE_API_URL={selfHostedUrl}{" "}</EnvVarPrefix>}
             <CommandPrefix>bunx</CommandPrefix>
             <CommandName>tokscale</CommandName>
             <CommandArg>submit</CommandArg>
             <CopyIconButton
-              onClick={() => handleCopyCommand("bunx tokscale submit")}
-              className={copiedCommand === "bunx tokscale submit" ? "copied" : ""}
+              onClick={() => handleCopyCommand(`${envPrefix}bunx tokscale submit`)}
+              className={copiedCommand === `${envPrefix}bunx tokscale submit` ? "copied" : ""}
               aria-label="Copy command"
             >
-              {copiedCommand === "bunx tokscale submit" ? <CheckIcon size={16} /> : <CopyIcon size={16} />}
+              {copiedCommand === `${envPrefix}bunx tokscale submit` ? <CheckIcon size={16} /> : <CopyIcon size={16} />}
             </CopyIconButton>
           </CodeLine>
         </CodeBlock>

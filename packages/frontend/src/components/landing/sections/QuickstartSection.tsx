@@ -4,10 +4,13 @@ import Image from "next/image";
 import styled, { css, keyframes } from "styled-components";
 import { useCopy, useSquircleClip } from "../hooks";
 import { SquircleBorder } from "../components";
+import { getSelfHostedUrl } from "@/lib/selfHosted";
 
 export function QuickstartSection() {
-  const tui = useCopy("bunx tokscale@latest");
-  const submit = useCopy("bunx tokscale@latest submit");
+  const selfHostedUrl = getSelfHostedUrl();
+  const envPrefix = selfHostedUrl ? `TOKSCALE_API_URL=${selfHostedUrl} ` : "";
+  const tui = useCopy(`${envPrefix}bunx tokscale@latest`);
+  const submit = useCopy(`${envPrefix}bunx tokscale@latest submit`);
   const cardsRow = useSquircleClip<HTMLDivElement>(32, 0.6, true, 1);
 
   return (
@@ -69,7 +72,10 @@ export function QuickstartSection() {
               </CardTitle>
               <CommandBox>
                 <CommandInputArea>
-                  <CommandText>bunx tokscale@latest</CommandText>
+                  <CommandText>
+                    {selfHostedUrl && <EnvPrefix>TOKSCALE_API_URL={selfHostedUrl}{" "}</EnvPrefix>}
+                    bunx tokscale@latest
+                  </CommandText>
                   <GradientAccent />
                 </CommandInputArea>
                 <CopyBtn onClick={tui.copy}>
@@ -99,7 +105,10 @@ export function QuickstartSection() {
               </CardTitle>
               <CommandBox>
                 <CommandInputArea>
-                  <CommandText>bunx tokscale@latest submit</CommandText>
+                  <CommandText>
+                    {selfHostedUrl && <EnvPrefix>TOKSCALE_API_URL={selfHostedUrl}{" "}</EnvPrefix>}
+                    bunx tokscale@latest submit
+                  </CommandText>
                   <GradientAccent $delay />
                 </CommandInputArea>
                 <CopyBtn onClick={submit.copy}>
@@ -264,7 +273,11 @@ const CommandInputArea = styled.div`
   background: #111b2c;
   border-radius: 8px;
   height: 36px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  &::-webkit-scrollbar { display: none; }
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 `;
 
 const CommandText = styled.span`
@@ -280,6 +293,10 @@ const CommandText = styled.span`
   @media (max-width: 480px) {
     font-size: 14px;
   }
+`;
+
+const EnvPrefix = styled.span`
+  color: #5a7a9a;
 `;
 
 const cursorSweep = keyframes`
