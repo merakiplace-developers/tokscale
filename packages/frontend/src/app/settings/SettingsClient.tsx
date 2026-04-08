@@ -333,7 +333,6 @@ export default function SettingsClient() {
 
       </MainContent>
 
-      <Footer />
     </PageWrapper>
   );
 }
