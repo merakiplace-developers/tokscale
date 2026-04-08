@@ -1,124 +1,77 @@
 "use client";
 
-import Image from "next/image";
-import styled, { css, keyframes } from "styled-components";
-import { useCopy, useSquircleClip } from "../hooks";
-import { SquircleBorder } from "../components";
+import styled, { keyframes } from "styled-components";
+import { useCopy } from "../hooks";
 import { getSelfHostedUrl } from "@/lib/selfHosted";
 
 export function QuickstartSection() {
   const selfHostedUrl = getSelfHostedUrl();
   const envPrefix = selfHostedUrl ? `TOKSCALE_API_URL=${selfHostedUrl} ` : "";
-  const tui = useCopy(`${envPrefix}bunx tokscale@latest`);
+  const viewStats = useCopy(`${envPrefix}bunx tokscale@latest`);
+  const login = useCopy(`${envPrefix}bunx tokscale@latest login`);
   const submit = useCopy(`${envPrefix}bunx tokscale@latest submit`);
-  const cardsRow = useSquircleClip<HTMLDivElement>(32, 0.6, true, 1);
 
   return (
     <>
-      {/* SVG clip-path def for cards */}
-      {cardsRow.svgDef && (
-        <svg
-          width="0"
-          height="0"
-          style={{ position: "absolute", overflow: "hidden" }}
-          aria-hidden="true"
-          role="presentation"
-        >
-          <defs>
-            <clipPath id={cardsRow.svgDef.id}>
-              <path
-                d={cardsRow.svgDef.path}
-                transform={`translate(0, -${cardsRow.svgDef.cornerRadius})`}
-              />
-            </clipPath>
-          </defs>
-        </svg>
-      )}
-
-      {/* Separator Bar */}
       <SeparatorBar />
 
-      {/* Quickstart Label */}
       <QuickstartLabel>
         <QuickstartText>Quickstart</QuickstartText>
       </QuickstartLabel>
 
-      {/* Quickstart Cards */}
-      <QuickstartCardsWrapper>
-        <QuickstartCardsRow
-          ref={cardsRow.ref}
-          style={{
-            clipPath: cardsRow.clipPath || undefined,
-          }}
-        >
-          <SquircleBorder def={cardsRow.borderDef} />
-          {/* Left Card */}
-          <QuickstartCard $position="left">
-            <CardPatternOverlay $position="left" />
-            <CardScreenshot>
-              <Image
-                src="/assets/landing/screenshot-tui-4d3240.png"
-                alt="TUI Screenshot"
-                width={171}
-                height={168}
-                style={{ width: 171.25, height: 168, objectFit: "cover", borderRadius: 8 }}
-              />
-            </CardScreenshot>
-            <CardContent>
-              <CardTitle>
-                View your
-                <br />
-                Usage Stats
-              </CardTitle>
-              <CommandBox>
-                <CommandInputArea>
-                  <CommandText>
-                    {selfHostedUrl && <EnvPrefix>TOKSCALE_API_URL={selfHostedUrl}{" "}</EnvPrefix>}
-                    bunx tokscale@latest
-                  </CommandText>
-                  <GradientAccent />
-                </CommandInputArea>
-                <CopyBtn onClick={tui.copy}>
-                  <CopyBtnText>{tui.copied ? "Copied!" : "Copy"}</CopyBtnText>
-                </CopyBtn>
-              </CommandBox>
-            </CardContent>
-          </QuickstartCard>
+      <CardList>
+        <CommandCard>
+          <CardTitle>View your Usage Stats</CardTitle>
+          <CommandBox>
+            <CommandInputArea>
+              <CommandText>
+                {selfHostedUrl && <EnvPrefix>TOKSCALE_API_URL={selfHostedUrl}{" "}</EnvPrefix>}
+                bunx tokscale@latest
+              </CommandText>
+              <GradientAccent />
+            </CommandInputArea>
+            <CopyBtn onClick={viewStats.copy}>
+              <CopyBtnText>{viewStats.copied ? "Copied!" : "Copy"}</CopyBtnText>
+            </CopyBtn>
+          </CommandBox>
+        </CommandCard>
 
-          {/* Right Card */}
-          <QuickstartCard $position="right">
-            <CardPatternOverlay $position="right" />
-            <CardScreenshot>
-              <Image
-                src="/assets/landing/screenshot-leaderboard-75a76a.png"
-                alt="Leaderboard Screenshot"
-                width={152}
-                height={180}
-                style={{ width: 152.02, height: 180, objectFit: "cover", borderRadius: 8 }}
-              />
-            </CardScreenshot>
-            <CardContent>
-              <CardTitle>
-                Submit DATA
-                <br />
-                to the Leaderboard
-              </CardTitle>
-              <CommandBox>
-                <CommandInputArea>
-                  <CommandText>
-                    {selfHostedUrl && <EnvPrefix>TOKSCALE_API_URL={selfHostedUrl}{" "}</EnvPrefix>}
-                    bunx tokscale@latest submit
-                  </CommandText>
-                  <GradientAccent $delay />
-                </CommandInputArea>
-                <CopyBtn onClick={submit.copy}>
-                  <CopyBtnText>{submit.copied ? "Copied!" : "Copy"}</CopyBtnText>
-                </CopyBtn>
-              </CommandBox>
-            </CardContent>
-          </QuickstartCard>
-        </QuickstartCardsRow>
-      </QuickstartCardsWrapper>
+        <CardDivider />
+
+        <CommandCard>
+          <CardTitle>Join to Leaderboard</CardTitle>
+          <CommandBox>
+            <CommandInputArea>
+              <CommandText>
+                {selfHostedUrl && <EnvPrefix>TOKSCALE_API_URL={selfHostedUrl}{" "}</EnvPrefix>}
+                bunx tokscale@latest login
+              </CommandText>
+              <GradientAccent $delay />
+            </CommandInputArea>
+            <CopyBtn onClick={login.copy}>
+              <CopyBtnText>{login.copied ? "Copied!" : "Copy"}</CopyBtnText>
+            </CopyBtn>
+          </CommandBox>
+        </CommandCard>
+
+        <CardDivider />
+
+        <CommandCard>
+          <CardTitle>Submit Data to the Leaderboard</CardTitle>
+          <CommandBox>
+            <CommandInputArea>
+              <CommandText>
+                {selfHostedUrl && <EnvPrefix>TOKSCALE_API_URL={selfHostedUrl}{" "}</EnvPrefix>}
+                bunx tokscale@latest submit
+              </CommandText>
+              <GradientAccent />
+            </CommandInputArea>
+            <CopyBtn onClick={submit.copy}>
+              <CopyBtnText>{submit.copied ? "Copied!" : "Copy"}</CopyBtnText>
+            </CopyBtn>
+          </CommandBox>
+        </CommandCard>
+      </CardList>
     </>
   );
 }
@@ -160,101 +113,49 @@ const QuickstartText = styled.span`
   color: #ffffff;
 `;
 
-/* ── Quickstart Cards ── */
-const QuickstartCardsWrapper = styled.div`
-  width: 100%;
-  padding-bottom: 64px;
-`;
-
-const QuickstartCardsRow = styled.div`
-  position: relative;
+/* ── Card List ── */
+const CardList = styled.div`
   width: 100%;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   background: #01070f;
-  overflow: hidden;
+  padding: 24px 32px;
 
-  @media (max-width: 900px) {
-    flex-direction: column;
+  @media (max-width: 480px) {
+    padding: 20px 16px;
   }
 `;
 
-const QuickstartCard = styled.div<{ $position: "left" | "right" }>`
-  position: relative;
-  flex: 1 1 0;
-  min-width: 0;
+const CommandCard = styled.div`
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  padding: ${({ $position }) =>
-    $position === "left" ? "32px" : "21px 32px 32px"};
-  min-height: ${({ $position }) =>
-    $position === "left" ? "320px" : "320px"};
-  ${({ $position }) =>
-    $position === "left" && css`
-      border-right: 1px solid #10233e;
-    `}
-
-  @media (max-width: 1000px) {
-    padding-left: 20px;
-    padding-right: 20px;
-    padding-bottom: 20px;
-  }
-
-  @media (max-width: 900px) {
-    ${({ $position }) =>
-      $position === "left" && css`
-      border-right: none;
-      border-bottom: 1px solid #10233e;
-    `}
-
-    padding-left: 32px;
-    padding-right: 32px;
-    padding-bottom: 32px;
-  }
+  gap: 12px;
+  padding: 20px 0;
 `;
 
-const CardPatternOverlay = styled.div<{ $position: "left" | "right" }>`
-  position: absolute;
-  left: 0;
-  top: ${({ $position }) => ($position === "left" ? "120px" : "96px")};
+const CardDivider = styled.div`
   width: 100%;
-  height: 24px;
-  background-image: url("/assets/landing/separator-pattern-slash@gray.svg");
-  background-size: 24px 24px;
-  background-repeat: repeat;
-  pointer-events: none;
-`;
-
-const CardScreenshot = styled.div`
-  position: absolute;
-  top: 32px;
-  right: 32px;
-`;
-
-const CardContent = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-self: stretch;
-  gap: 20px;
-  margin-top: auto;
+  height: 1px;
+  background: #10233e;
 `;
 
 const CardTitle = styled.h3`
   font-family: var(--font-figtree), "Figtree", sans-serif;
   font-weight: 700;
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1em;
   text-transform: uppercase;
   color: #ffffff;
-  z-index: 1;
+
+  @media (max-width: 480px) {
+    font-size: 16px;
+  }
 `;
 
 const CommandBox = styled.div`
   display: flex;
   flex-direction: row;
   align-items: center;
-  align-self: stretch;
   gap: 6px;
   padding: 8px;
   background: #010a15;
@@ -268,6 +169,7 @@ const CommandInputArea = styled.div`
   flex-direction: row;
   align-items: center;
   flex: 1;
+  min-width: 0;
   gap: 10px;
   padding: 0 12px;
   background: #111b2c;
@@ -283,15 +185,14 @@ const CommandInputArea = styled.div`
 const CommandText = styled.span`
   font-family: "Inconsolata", monospace !important;
   font-weight: 700;
-  font-size: 11px;
+  font-size: 14px;
   line-height: 0.94em;
   letter-spacing: -0.03em;
-  text-align: center;
   color: #9ad7ed;
   white-space: nowrap;
 
   @media (max-width: 480px) {
-    font-size: 10px;
+    font-size: 12px;
   }
 `;
 
