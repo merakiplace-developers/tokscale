@@ -7,6 +7,7 @@ import { getSelfHostedUrl } from "@/lib/selfHosted";
 export function QuickstartSection() {
   const selfHostedUrl = getSelfHostedUrl();
   const envPrefix = selfHostedUrl ? `TOKSCALE_API_URL=${selfHostedUrl} ` : "";
+  const installBun = useCopy("curl -fsSL https://bun.com/install | bash");
   const viewStats = useCopy(`${envPrefix}bunx tokscale@latest`);
   const login = useCopy(`${envPrefix}bunx tokscale@latest login`);
   const submit = useCopy(`${envPrefix}bunx tokscale@latest submit`);
@@ -20,6 +21,23 @@ export function QuickstartSection() {
       </QuickstartLabel>
 
       <CardList>
+        <CommandCard>
+          <CardTitle>Install Bun</CardTitle>
+          <CommandBox>
+            <CommandInputArea>
+              <CommandText>
+                curl -fsSL https://bun.com/install | bash
+              </CommandText>
+              <GradientAccent />
+            </CommandInputArea>
+            <CopyBtn onClick={installBun.copy}>
+              <CopyBtnText>{installBun.copied ? "Copied!" : "Copy"}</CopyBtnText>
+            </CopyBtn>
+          </CommandBox>
+        </CommandCard>
+
+        <CardDivider />
+
         <CommandCard>
           <CardTitle>View your Usage Stats</CardTitle>
           <CommandBox>
