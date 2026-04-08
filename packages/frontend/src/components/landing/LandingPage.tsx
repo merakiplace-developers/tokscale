@@ -19,7 +19,7 @@ const PageWrapper = styled.div`
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 0 16px;
+  padding: 80px 16px 0;
 `;
 
 const PageInner = styled.div`
