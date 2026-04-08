@@ -1,3 +1,4 @@
+mod anthropic_api;
 mod auth;
 mod commands;
 mod cursor;
@@ -256,6 +257,17 @@ enum Commands {
     },
     #[command(about = "Login to Tokscale (opens browser for GitHub auth)")]
     Login,
+    #[command(about = "Sync usage data from provider APIs (Anthropic, Cursor)")]
+    SyncApi {
+        #[arg(long, help = "Sync Anthropic Admin API usage")]
+        anthropic: bool,
+        #[arg(long, help = "Sync Cursor usage")]
+        cursor: bool,
+        #[arg(long, help = "Start date (YYYY-MM-DD)")]
+        since: Option<String>,
+        #[arg(long, help = "End date (YYYY-MM-DD)")]
+        until: Option<String>,
+    },
     #[command(about = "Logout from Tokscale")]
     Logout,
     #[command(about = "Show current logged in user")]
@@ -692,6 +704,12 @@ fn main() -> Result<()> {
         }) => run_pricing_lookup(&model_id, json, provider.as_deref(), no_spinner),
         Some(Commands::Clients { json }) => run_clients_command(json),
         Some(Commands::Login) => run_login_command(),
+        Some(Commands::SyncApi {
+            anthropic,
+            cursor,
+            since,
+            until,
+        }) => run_sync_api_command(anthropic, cursor, since, until),
         Some(Commands::Logout) => run_logout_command(),
         Some(Commands::Whoami) => run_whoami_command(),
         Some(Commands::Graph {
@@ -2190,6 +2208,7 @@ fn capitalize_client(client: &str) -> String {
         "claude" => "Claude".to_string(),
         "codex" => "Codex".to_string(),
         "cursor" => "Cursor".to_string(),
+        "anthropic-api" => "Anthropic API".to_string(),
         "gemini" => "Gemini".to_string(),
         "amp" => "Amp".to_string(),
         "droid" => "Droid".to_string(),
@@ -2677,6 +2696,89 @@ fn run_login_command() -> Result<()> {
     rt.block_on(async { auth::login().await })
 }
 
+fn run_sync_api_command(
+    anthropic: bool,
+    cursor_flag: bool,
+    since: Option<String>,
+    until: Option<String>,
+) -> Result<()> {
+    use colored::Colorize;
+    use tokio::runtime::Runtime;
+
+    let sync_all = !anthropic && !cursor_flag;
+
+    println!("\n  {}\n", "Tokscale - Sync API Usage Data".cyan());
+
+    let rt = Runtime::new()?;
+
+    if sync_all || anthropic {
+        if anthropic_api::is_logged_in() {
+            println!("{}", "  Syncing Anthropic API usage...".bright_black());
+            let result = rt.block_on(async {
+                anthropic_api::sync_anthropic_cache(since.clone(), until.clone()).await
+            });
+            if result.synced {
+                println!(
+                    "{}",
+                    format!("  Anthropic: {} usage entries synced", result.rows).green()
+                );
+            } else if let Some(err) = result.error {
+                println!("{}", format!("  Anthropic sync failed: {}", err).yellow());
+            }
+        } else {
+            println!("{}", "  Anthropic: not configured.".bright_black());
+            println!(
+                "{}",
+                "  To set up, provide your Anthropic Admin API key:".bright_black()
+            );
+            print!("\n  Admin API Key: ");
+            std::io::stdout().flush()?;
+            let key = rpassword::read_password()?;
+            let key = key.trim();
+            if key.is_empty() {
+                println!("{}", "  Skipped.".bright_black());
+            } else {
+                anthropic_api::save_credentials(key)?;
+                println!("{}", "  Credentials saved.".green());
+                let result = rt.block_on(async {
+                    anthropic_api::sync_anthropic_cache(since.clone(), until.clone()).await
+                });
+                if result.synced {
+                    println!(
+                        "{}",
+                        format!("  Anthropic: {} usage entries synced", result.rows).green()
+                    );
+                } else if let Some(err) = result.error {
+                    println!("{}", format!("  Anthropic sync failed: {}", err).yellow());
+                }
+            }
+        }
+    }
+
+    if sync_all || cursor_flag {
+        if cursor::is_cursor_logged_in() {
+            println!("{}", "  Syncing Cursor usage...".bright_black());
+            let result = rt.block_on(async { cursor::sync_cursor_cache().await });
+            if result.synced {
+                println!(
+                    "{}",
+                    format!("  Cursor: {} usage events synced", result.rows).green()
+                );
+            } else if let Some(err) = result.error {
+                println!("{}", format!("  Cursor sync failed: {}", err).yellow());
+            }
+        } else {
+            println!(
+                "{}",
+                "  Cursor: not configured. Run 'tokscale cursor login' first.".bright_black()
+            );
+        }
+    }
+
+    println!();
+    Ok(())
+}
+
 fn run_logout_command() -> Result<()> {
     auth::logout()
 }
@@ -3014,6 +3116,34 @@ fn run_submit_command(
 
     println!("\n  {}\n", "Tokscale - Submit Usage Data".cyan());
 
+    // Sync Anthropic API usage if configured
+    let include_anthropic_api = clients
+        .as_ref()
+        .is_none_or(|s| s.iter().any(|src| src == "anthropic-api"));
+    let has_anthropic_cache = anthropic_api::has_cache();
+    if include_anthropic_api && anthropic_api::is_logged_in() {
+        println!("{}", "  Syncing Anthropic API usage...".bright_black());
+        let rt_sync = Runtime::new()?;
+        let sync_result = rt_sync.block_on(async {
+            anthropic_api::sync_anthropic_cache(since.clone(), until.clone()).await
+        });
+        if sync_result.synced {
+            println!(
+                "{}",
+                format!("  Anthropic API: {} usage entries synced", sync_result.rows)
+                    .bright_black()
+            );
+        } else if let Some(err) = sync_result.error {
+            if has_anthropic_cache {
+                println!(
+                    "{}",
+                    format!("  Anthropic API sync failed; using cached data: {}", err).yellow()
+                );
+            }
+        }
+    }
+
+    // Sync Cursor usage if configured
     let include_cursor = clients
         .as_ref()
         .is_none_or(|s| s.iter().any(|src| src == "cursor"));

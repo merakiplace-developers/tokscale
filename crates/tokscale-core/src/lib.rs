@@ -864,6 +864,23 @@ fn parse_all_messages_with_pricing(
         all_messages.extend(kilo_messages);
     }
 
+    // Anthropic API: CSV cache from Admin API
+    let anthropic_api_outcomes: Vec<CachedParseOutcome> = scan_result
+        .get(ClientId::AnthropicApi)
+        .par_iter()
+        .map(|path| {
+            load_or_parse_source(path, &source_cache, pricing, |path| {
+                sessions::anthropic_api::parse_anthropic_api_file(path)
+            })
+        })
+        .collect();
+    for outcome in anthropic_api_outcomes {
+        all_messages.extend(outcome.messages);
+        if let Some(entry) = outcome.cache_entry {
+            source_cache.insert(entry);
+        }
+    }
+
     if include_synthetic {
         if let Some(db_path) = &scan_result.synthetic_db {
             let outcome = load_or_parse_sqlite_source(db_path, &source_cache, pricing, |path| {
@@ -1513,6 +1530,21 @@ pub fn parse_local_clients(options: LocalParseOptions) -> Result<ParsedMessages,
     } else {
         0
     };
+
+    // Anthropic API: CSV cache
+    let anthropic_api_msgs: Vec<ParsedMessage> = scan_result
+        .get(ClientId::AnthropicApi)
+        .par_iter()
+        .flat_map(|path| {
+            sessions::anthropic_api::parse_anthropic_api_file(path)
+                .into_iter()
+                .map(|msg| unified_to_parsed(&msg))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let anthropic_api_count = anthropic_api_msgs.len() as i32;
+    counts.set(ClientId::AnthropicApi, anthropic_api_count);
+    messages.extend(anthropic_api_msgs);
 
     if include_synthetic {
         if let Some(db_path) = &scan_result.synthetic_db {

@@ -227,6 +227,14 @@ define_clients!(
         pattern: "kilo.db",
         headless: false,
         parse_local: true
+    },
+    AnthropicApi = 15 => {
+        id: "anthropic-api",
+        root: PathRoot::Home,
+        relative: ".config/tokscale/anthropic-cache",
+        pattern: "usage*.csv",
+        headless: false,
+        parse_local: false
     }
 );
 
@@ -279,7 +287,7 @@ mod tests {
 
     #[test]
     fn test_client_id_count() {
-        assert_eq!(ClientId::COUNT, 15);
+        assert_eq!(ClientId::COUNT, 16);
     }
 
     #[test]

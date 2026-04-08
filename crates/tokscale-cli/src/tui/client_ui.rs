@@ -66,6 +66,10 @@ pub const CLIENT_UI: [ClientUi; ClientId::COUNT] = [
         display_name: "Kilo CLI",
         hotkey: 'l',
     },
+    ClientUi {
+        display_name: "Anthropic API",
+        hotkey: 'A',
+    },
 ];
 
 pub fn display_name(client: ClientId) -> &'static str {
