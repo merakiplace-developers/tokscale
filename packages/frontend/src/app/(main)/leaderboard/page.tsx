@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { Navigation } from "@/components/layout/Navigation";
 import { Footer } from "@/components/layout/Footer";
 import { BlackholeHero } from "@/components/BlackholeHero";
@@ -10,7 +11,11 @@ import { getSession } from "@/lib/auth/session";
 import { SORT_BY_COOKIE_NAME, isValidSortBy } from "@/lib/leaderboard/constants";
 import LeaderboardClient from "./LeaderboardClient";
 
-export default function LeaderboardPage() {
+export default async function LeaderboardPage() {
+  const session = await getSession();
+  if (!session) {
+    redirect("/login?returnTo=/leaderboard");
+  }
   return (
     <div
       style={{
@@ -44,9 +49,8 @@ async function LeaderboardWithPreferences() {
     getSession(),
   ]);
 
-  const initialUserRank = session
-    ? await getUserRank(session.username, "all", sortBy)
-    : null;
+  // session is guaranteed by the auth guard in LeaderboardPage
+  const initialUserRank = await getUserRank(session!.username, "all", sortBy);
 
   return (
     <LeaderboardClient

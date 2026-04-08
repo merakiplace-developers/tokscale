@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 // Routes that require authentication
-const PROTECTED_ROUTES = ["/settings"];
+const PROTECTED_ROUTES = ["/settings", "/leaderboard"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -33,5 +33,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/settings/:path*"],
+  matcher: ["/settings/:path*", "/leaderboard/:path*"],
 };
