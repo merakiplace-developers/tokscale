@@ -130,7 +130,7 @@ export async function POST(request: Request) {
       ...data,
       summary: {
         ...data.summary,
-        clients: Array.from(submittedClients).sort(),
+        clients: Array.from(submittedClients).sort() as SubmissionData["summary"]["clients"],
       },
     };
 
