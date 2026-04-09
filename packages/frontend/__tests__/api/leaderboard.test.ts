@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
 
 const getLeaderboardData = vi.fn();
 
@@ -60,7 +61,7 @@ describe("GET /api/leaderboard", () => {
     });
 
     const response = await GET(
-      new Request("http://localhost:3000/api/leaderboard?period=all&page=1&limit=10&sortBy=tokens")
+      new NextRequest("http://localhost:3000/api/leaderboard?period=all&page=1&limit=10&sortBy=tokens")
     );
     const body = await response.json();
 
