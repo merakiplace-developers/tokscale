@@ -126,6 +126,95 @@ export function clientContributionToBreakdownData(
   };
 }
 
+export type DeviceContributions = Record<string, Record<string, ClientBreakdownData>>;
+
+/**
+ * Initialize deviceContributions from a legacy daily_breakdown row
+ * that has sourceBreakdown but no deviceContributions.
+ *
+ * Clients in submittedClients are excluded from __legacy__ to avoid
+ * double-counting (the current device will provide authoritative data for those).
+ */
+export function initDeviceContributionsFromLegacy(
+  existingSourceBreakdown: Record<string, ClientBreakdownData>,
+  submittedClients: Set<string>,
+): DeviceContributions {
+  const legacySlot: Record<string, ClientBreakdownData> = {};
+  for (const [clientName, clientData] of Object.entries(existingSourceBreakdown)) {
+    if (!submittedClients.has(clientName)) {
+      legacySlot[clientName] = clientData;
+    }
+  }
+
+  if (Object.keys(legacySlot).length === 0) {
+    return {};
+  }
+  return { __legacy__: legacySlot };
+}
+
+/**
+ * Aggregate client data across all devices by summing per-client values.
+ * Returns a sourceBreakdown-shaped object (same format as before).
+ */
+export function aggregateDeviceContributions(
+  deviceContributions: DeviceContributions,
+): Record<string, ClientBreakdownData> {
+  const aggregated: Record<string, ClientBreakdownData> = {};
+
+  for (const deviceSlot of Object.values(deviceContributions)) {
+    for (const [clientName, clientData] of Object.entries(deviceSlot)) {
+      const existing = aggregated[clientName];
+      if (!existing) {
+        aggregated[clientName] = {
+          tokens: clientData.tokens || 0,
+          cost: clientData.cost || 0,
+          input: clientData.input || 0,
+          output: clientData.output || 0,
+          cacheRead: clientData.cacheRead || 0,
+          cacheWrite: clientData.cacheWrite || 0,
+          reasoning: clientData.reasoning || 0,
+          messages: clientData.messages || 0,
+          models: {},
+        };
+        if (clientData.models) {
+          for (const [modelId, modelData] of Object.entries(clientData.models)) {
+            aggregated[clientName].models[modelId] = { ...modelData };
+          }
+        }
+      } else {
+        existing.tokens += clientData.tokens || 0;
+        existing.cost += clientData.cost || 0;
+        existing.input += clientData.input || 0;
+        existing.output += clientData.output || 0;
+        existing.cacheRead += clientData.cacheRead || 0;
+        existing.cacheWrite += clientData.cacheWrite || 0;
+        existing.reasoning += clientData.reasoning || 0;
+        existing.messages += clientData.messages || 0;
+
+        if (clientData.models) {
+          for (const [modelId, modelData] of Object.entries(clientData.models)) {
+            const existingModel = existing.models[modelId];
+            if (existingModel) {
+              existingModel.tokens += modelData.tokens || 0;
+              existingModel.cost += modelData.cost || 0;
+              existingModel.input += modelData.input || 0;
+              existingModel.output += modelData.output || 0;
+              existingModel.cacheRead += modelData.cacheRead || 0;
+              existingModel.cacheWrite += modelData.cacheWrite || 0;
+              existingModel.reasoning += modelData.reasoning || 0;
+              existingModel.messages += modelData.messages || 0;
+            } else {
+              existing.models[modelId] = { ...modelData };
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return aggregated;
+}
+
 /**
  * Merge two nullable timestamps, keeping the earliest non-null value.
  * Used by both submit and profile aggregation to maintain consistent merge semantics.

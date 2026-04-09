@@ -251,6 +251,30 @@ export const dailyBreakdown = pgTable(
       >
     >(),
     modelBreakdown: jsonb("model_breakdown").$type<Record<string, number>>(),
+    /** Per-device client breakdown for multi-device merge. Keyed by device name (API token name). */
+    deviceContributions: jsonb("device_contributions").$type<
+      Record<string, Record<string, {
+        tokens: number;
+        cost: number;
+        input: number;
+        output: number;
+        cacheRead: number;
+        cacheWrite: number;
+        reasoning: number;
+        messages: number;
+        models: Record<string, {
+          tokens: number;
+          cost: number;
+          input: number;
+          output: number;
+          cacheRead: number;
+          cacheWrite: number;
+          reasoning: number;
+          messages: number;
+        }>;
+        modelId?: string;
+      }>>
+    >(),
   },
   (table) => [
     index("idx_daily_breakdown_submission_id").on(table.submissionId),

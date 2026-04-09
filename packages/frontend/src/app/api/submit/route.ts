@@ -9,12 +9,14 @@ import {
 } from "@/lib/validation/submission";
 import { authenticatePersonalToken } from "@/lib/auth/personalTokens";
 import {
-  mergeClientBreakdowns,
   recalculateDayTotals,
   buildModelBreakdown,
   clientContributionToBreakdownData,
   mergeTimestampMs,
+  initDeviceContributionsFromLegacy,
+  aggregateDeviceContributions,
   type ClientBreakdownData,
+  type DeviceContributions,
 } from "@/lib/db/helpers";
 
 function normalizeSubmissionData(data: unknown): void {
@@ -86,6 +88,7 @@ export async function POST(request: Request) {
     }
 
     const tokenRecord = authResult;
+    const deviceKey = tokenRecord.tokenName;
 
     // ========================================
     // STEP 2: Parse and Validate
@@ -189,6 +192,7 @@ export async function POST(request: Request) {
           date: dailyBreakdown.date,
           timestampMs: dailyBreakdown.timestampMs,
           sourceBreakdown: dailyBreakdown.sourceBreakdown,
+          deviceContributions: dailyBreakdown.deviceContributions,
         })
         .from(dailyBreakdown)
         .where(eq(dailyBreakdown.submissionId, submissionId))
@@ -211,6 +215,7 @@ export async function POST(request: Request) {
         timestampMs: number | null;
         sourceBreakdown: Record<string, ClientBreakdownData>;
         modelBreakdown: Record<string, number>;
+        deviceContributions: DeviceContributions;
       }> = [];
 
       const toUpdate: Array<{
@@ -222,6 +227,7 @@ export async function POST(request: Request) {
         timestampMs: number | null;
         sourceBreakdown: Record<string, ClientBreakdownData>;
         modelBreakdown: Record<string, number>;
+        deviceContributions: DeviceContributions;
       }> = [];
 
       for (const incomingDay of data.contributions) {
@@ -262,12 +268,42 @@ export async function POST(request: Request) {
         const existingDay = existingDaysMap.get(incomingDay.date);
 
         if (existingDay) {
-           const existingClientBreakdown = (existingDay.sourceBreakdown || {}) as Record<string, ClientBreakdownData>;
-           const mergedClientBreakdown = mergeClientBreakdowns(
-             existingClientBreakdown,
-             incomingClientBreakdown,
-             submittedClients
-           );
+          // ── Device-aware merge ──
+          let devContribs: DeviceContributions;
+          if (existingDay.deviceContributions) {
+            devContribs = { ...(existingDay.deviceContributions as DeviceContributions) };
+          } else if (existingDay.sourceBreakdown) {
+            devContribs = initDeviceContributionsFromLegacy(
+              existingDay.sourceBreakdown as Record<string, ClientBreakdownData>,
+              submittedClients,
+            );
+          } else {
+            devContribs = {};
+          }
+
+          // Replace current device's slot
+          const previousDeviceSlot = devContribs[deviceKey] || {};
+          const newDeviceSlot: Record<string, ClientBreakdownData> = {};
+
+          for (const [clientName, clientData] of Object.entries(previousDeviceSlot)) {
+            if (!submittedClients.has(clientName)) {
+              newDeviceSlot[clientName] = clientData;
+            }
+          }
+          for (const clientName of submittedClients) {
+            if (incomingClientBreakdown[clientName]) {
+              newDeviceSlot[clientName] = { ...incomingClientBreakdown[clientName] };
+            }
+          }
+
+          if (Object.keys(newDeviceSlot).length > 0) {
+            devContribs[deviceKey] = newDeviceSlot;
+          } else {
+            delete devContribs[deviceKey];
+          }
+
+          // Aggregate across all devices
+          const mergedClientBreakdown = aggregateDeviceContributions(devContribs);
           const dayTotals = recalculateDayTotals(mergedClientBreakdown);
           const modelBreakdown = buildModelBreakdown(mergedClientBreakdown);
 
@@ -280,10 +316,15 @@ export async function POST(request: Request) {
             timestampMs: mergeTimestampMs(existingDay.timestampMs, incomingDay.timestampMs ?? null),
             sourceBreakdown: mergedClientBreakdown,
             modelBreakdown,
+            deviceContributions: devContribs,
           });
         } else {
           const dayTotals = recalculateDayTotals(incomingClientBreakdown);
           const modelBreakdown = buildModelBreakdown(incomingClientBreakdown);
+
+          const devContribs: DeviceContributions = {
+            [deviceKey]: { ...incomingClientBreakdown },
+          };
 
           toInsert.push({
             submissionId,
@@ -295,6 +336,7 @@ export async function POST(request: Request) {
             timestampMs: incomingDay.timestampMs ?? null,
             sourceBreakdown: incomingClientBreakdown,
             modelBreakdown,
+            deviceContributions: devContribs,
           });
         }
       }
@@ -308,7 +350,7 @@ export async function POST(request: Request) {
       if (toUpdate.length > 0) {
         const valuesClauses = toUpdate.map(
           (row) =>
-            sql`(${row.id}::uuid, ${row.tokens}::bigint, ${row.cost}::numeric(10,4), ${row.inputTokens}::bigint, ${row.outputTokens}::bigint, ${row.timestampMs}::bigint, ${JSON.stringify(row.sourceBreakdown)}::jsonb, ${JSON.stringify(row.modelBreakdown)}::jsonb)`
+            sql`(${row.id}::uuid, ${row.tokens}::bigint, ${row.cost}::numeric(10,4), ${row.inputTokens}::bigint, ${row.outputTokens}::bigint, ${row.timestampMs}::bigint, ${JSON.stringify(row.sourceBreakdown)}::jsonb, ${JSON.stringify(row.modelBreakdown)}::jsonb, ${JSON.stringify(row.deviceContributions)}::jsonb)`
         );
 
         const valuesList = sql.join(valuesClauses, sql`, `);
@@ -321,9 +363,10 @@ export async function POST(request: Request) {
             output_tokens = batch.output_tokens,
             timestamp_ms = batch.timestamp_ms,
             source_breakdown = batch.source_breakdown,
-            model_breakdown = batch.model_breakdown
+            model_breakdown = batch.model_breakdown,
+            device_contributions = batch.device_contributions
           FROM (VALUES ${valuesList})
-            AS batch(id, tokens, cost, input_tokens, output_tokens, timestamp_ms, source_breakdown, model_breakdown)
+            AS batch(id, tokens, cost, input_tokens, output_tokens, timestamp_ms, source_breakdown, model_breakdown, device_contributions)
           WHERE d.id = batch.id
         `);
       }
