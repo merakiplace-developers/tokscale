@@ -120,7 +120,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const submittedClients = new Set<SubmissionData["summary"]["clients"][number]>(data.summary.clients);
+    const submittedClients = new Set<string>(data.summary.clients);
     for (const contribution of data.contributions) {
       for (const client_contrib of contribution.clients) {
         submittedClients.add(client_contrib.client);
