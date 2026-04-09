@@ -1,13 +1,35 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import styled, { keyframes } from "styled-components";
-import { useCopy } from "../hooks";
+import { useCopy, useOS } from "../hooks";
 import { getSelfHostedUrl } from "@/lib/selfHosted";
 
+type Platform = "unix" | "windows";
+
 export function QuickstartSection() {
+  const os = useOS();
   const selfHostedUrl = getSelfHostedUrl();
-  const envPrefix = selfHostedUrl ? `TOKSCALE_API_URL=${selfHostedUrl} ` : "";
-  const installBun = useCopy("curl -fsSL https://bun.com/install | bash");
+
+  const [platform, setPlatform] = useState<Platform>("unix");
+
+  useEffect(() => {
+    if (os === "windows") setPlatform("windows");
+  }, [os]);
+
+  const isWindows = platform === "windows";
+
+  const installCmd = isWindows
+    ? 'powershell -c "irm bun.sh/install.ps1 | iex"'
+    : "curl -fsSL https://bun.com/install | bash";
+
+  const envPrefix = selfHostedUrl
+    ? isWindows
+      ? `$env:TOKSCALE_API_URL="${selfHostedUrl}"; `
+      : `TOKSCALE_API_URL=${selfHostedUrl} `
+    : "";
+
+  const installBun = useCopy(installCmd);
   const viewStats = useCopy(`${envPrefix}bunx tokscale@latest`);
   const login = useCopy(`${envPrefix}bunx tokscale@latest login`);
   const submit = useCopy(`${envPrefix}bunx tokscale@latest submit`);
@@ -18,6 +40,20 @@ export function QuickstartSection() {
 
       <QuickstartLabel>
         <QuickstartText>Quickstart</QuickstartText>
+        <PlatformToggle>
+          <PlatformOption
+            $active={platform === "unix"}
+            onClick={() => setPlatform("unix")}
+          >
+            macOS / Linux
+          </PlatformOption>
+          <PlatformOption
+            $active={platform === "windows"}
+            onClick={() => setPlatform("windows")}
+          >
+            Windows
+          </PlatformOption>
+        </PlatformToggle>
       </QuickstartLabel>
 
       <CardList>
@@ -25,15 +61,16 @@ export function QuickstartSection() {
           <CardTitle>Install Bun</CardTitle>
           <CommandBox>
             <CommandInputArea>
-              <CommandText>
-                curl -fsSL https://bun.com/install | bash
-              </CommandText>
+              <CommandText>{installCmd}</CommandText>
               <GradientAccent />
             </CommandInputArea>
             <CopyBtn onClick={installBun.copy}>
               <CopyBtnText>{installBun.copied ? "Copied!" : "Copy"}</CopyBtnText>
             </CopyBtn>
           </CommandBox>
+          {isWindows && (
+            <HintText>PowerShell is pre-installed on Windows 10+</HintText>
+          )}
         </CommandCard>
 
         <CardDivider />
@@ -43,7 +80,13 @@ export function QuickstartSection() {
           <CommandBox>
             <CommandInputArea>
               <CommandText>
-                {selfHostedUrl && <EnvPrefix>TOKSCALE_API_URL={selfHostedUrl}{" "}</EnvPrefix>}
+                {selfHostedUrl && (
+                  <EnvPrefix>
+                    {isWindows
+                      ? `$env:TOKSCALE_API_URL="${selfHostedUrl}"; `
+                      : `TOKSCALE_API_URL=${selfHostedUrl} `}
+                  </EnvPrefix>
+                )}
                 bunx tokscale@latest
               </CommandText>
               <GradientAccent />
@@ -61,7 +104,13 @@ export function QuickstartSection() {
           <CommandBox>
             <CommandInputArea>
               <CommandText>
-                {selfHostedUrl && <EnvPrefix>TOKSCALE_API_URL={selfHostedUrl}{" "}</EnvPrefix>}
+                {selfHostedUrl && (
+                  <EnvPrefix>
+                    {isWindows
+                      ? `$env:TOKSCALE_API_URL="${selfHostedUrl}"; `
+                      : `TOKSCALE_API_URL=${selfHostedUrl} `}
+                  </EnvPrefix>
+                )}
                 bunx tokscale@latest login
               </CommandText>
               <GradientAccent $delay />
@@ -79,7 +128,13 @@ export function QuickstartSection() {
           <CommandBox>
             <CommandInputArea>
               <CommandText>
-                {selfHostedUrl && <EnvPrefix>TOKSCALE_API_URL={selfHostedUrl}{" "}</EnvPrefix>}
+                {selfHostedUrl && (
+                  <EnvPrefix>
+                    {isWindows
+                      ? `$env:TOKSCALE_API_URL="${selfHostedUrl}"; `
+                      : `TOKSCALE_API_URL=${selfHostedUrl} `}
+                  </EnvPrefix>
+                )}
                 bunx tokscale@latest submit
               </CommandText>
               <GradientAccent />
@@ -114,11 +169,17 @@ const QuickstartLabel = styled.div`
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
   padding: 20px 32px;
   background: #0073ff;
   border-left: 1px solid #10233e;
   border-right: 1px solid #10233e;
+
+  @media (max-width: 480px) {
+    justify-content: center;
+  }
 `;
 
 const QuickstartText = styled.span`
@@ -129,6 +190,33 @@ const QuickstartText = styled.span`
   text-transform: uppercase;
   text-align: center;
   color: #ffffff;
+`;
+
+/* ── Platform Toggle ── */
+const PlatformToggle = styled.div`
+  display: flex;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+`;
+
+const PlatformOption = styled.button<{ $active: boolean }>`
+  font-family: var(--font-figtree), "Figtree", sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  background: ${({ $active }) => ($active ? "rgba(255, 255, 255, 0.2)" : "transparent")};
+  color: ${({ $active }) => ($active ? "#ffffff" : "rgba(255, 255, 255, 0.6)")};
+
+  &:hover {
+    background: ${({ $active }) =>
+      $active ? "rgba(255, 255, 255, 0.2)" : "rgba(255, 255, 255, 0.1)"};
+  }
 `;
 
 /* ── Card List ── */
@@ -216,6 +304,13 @@ const CommandText = styled.span`
 
 const EnvPrefix = styled.span`
   color: #5a7a9a;
+`;
+
+const HintText = styled.span`
+  font-family: var(--font-figtree), "Figtree", sans-serif;
+  font-size: 12px;
+  color: #5a7a9a;
+  padding-left: 4px;
 `;
 
 const cursorSweep = keyframes`
