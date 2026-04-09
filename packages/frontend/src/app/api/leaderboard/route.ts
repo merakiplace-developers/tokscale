@@ -4,7 +4,7 @@ import type { Period, SortBy } from "@/lib/leaderboard/types";
 
 export const dynamic = "force-dynamic";
 
-const VALID_PERIODS: Period[] = ["all", "month", "week"];
+const VALID_PERIODS: Period[] = ["all", "month", "week", "day"];
 const VALID_SORT_BY: SortBy[] = ["tokens", "cost"];
 
 function parseIntSafe(value: string | null, defaultValue: number): number {

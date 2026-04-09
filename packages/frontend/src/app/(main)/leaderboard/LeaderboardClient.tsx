@@ -766,7 +766,7 @@ const PaginationPages = styled.div`
   }
 `;
 
-export type Period = "all" | "month" | "week";
+export type Period = "all" | "month" | "week" | "day";
 
 export interface LeaderboardUser {
   rank: number;
@@ -1128,6 +1128,7 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
             { id: "all" as Period, label: "All Time" },
             { id: "month" as Period, label: "This Month" },
             { id: "week" as Period, label: "This Week" },
+            { id: "day" as Period, label: "Today" },
           ]}
           activeTab={period}
           onTabChange={(tab) => {
