@@ -48,8 +48,10 @@ interface AllTimeLeaderboardDbRow {
   schemaVersion: number | null;
 }
 
-function toUtcDateString(date: Date): string {
-  return date.toISOString().slice(0, 10);
+const LEADERBOARD_TIMEZONE = process.env.LEADERBOARD_TIMEZONE || "UTC";
+
+function toDateStringInTz(date: Date): string {
+  return date.toLocaleDateString("en-CA", { timeZone: LEADERBOARD_TIMEZONE });
 }
 
 function getPeriodDateRange(
@@ -60,28 +62,25 @@ function getPeriodDateRange(
     return null;
   }
 
-  const end = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-  );
+  const todayStr = toDateStringInTz(now);
 
   if (period === "day") {
-    const todayStr = toUtcDateString(end);
     return { start: todayStr, end: todayStr };
   }
 
+  const [year, month, day] = todayStr.split("-").map(Number);
+
   if (period === "week") {
-    const start = new Date(end);
-    start.setUTCDate(start.getUTCDate() - 6);
+    const startDate = new Date(Date.UTC(year, month - 1, day - 6));
     return {
-      start: toUtcDateString(start),
-      end: toUtcDateString(end),
+      start: startDate.toISOString().slice(0, 10),
+      end: todayStr,
     };
   }
 
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   return {
-    start: toUtcDateString(start),
-    end: toUtcDateString(end),
+    start: `${year}-${String(month).padStart(2, "0")}-01`,
+    end: todayStr,
   };
 }
 
