@@ -11,14 +11,18 @@ import {
 
 export type { LeaderboardSortBy };
 
+export type RefreshInterval = number | null;
+
 export interface Settings {
   paletteName: ColorPaletteName;
   leaderboardSortBy: LeaderboardSortBy;
+  refreshInterval: RefreshInterval;
 }
 
 const DEFAULT_SETTINGS: Settings = {
   paletteName: DEFAULT_PALETTE,
   leaderboardSortBy: 'tokens',
+  refreshInterval: null,
 };
 
 const STORAGE_KEY = "tokscale-settings";
@@ -37,9 +41,10 @@ function getStoredSettings(): Settings {
       const parsed = JSON.parse(stored);
       return {
         paletteName: parsed.paletteName || DEFAULT_SETTINGS.paletteName,
-        leaderboardSortBy: isValidSortBy(parsed.leaderboardSortBy) 
-          ? parsed.leaderboardSortBy 
+        leaderboardSortBy: isValidSortBy(parsed.leaderboardSortBy)
+          ? parsed.leaderboardSortBy
           : DEFAULT_SETTINGS.leaderboardSortBy,
+        refreshInterval: typeof parsed.refreshInterval === "number" ? parsed.refreshInterval : null,
       };
     }
   } catch {
@@ -96,11 +101,21 @@ export function useSettings() {
     });
   }, []);
 
+  const setRefreshInterval = useCallback((interval: RefreshInterval) => {
+    setSettings((prev) => {
+      const newSettings = { ...prev, refreshInterval: interval };
+      saveSettings(newSettings);
+      return newSettings;
+    });
+  }, []);
+
   return {
     paletteName: settings.paletteName,
     setPalette,
     leaderboardSortBy: settings.leaderboardSortBy,
     setLeaderboardSort,
+    refreshInterval: settings.refreshInterval,
+    setRefreshInterval,
     mounted,
   };
 }

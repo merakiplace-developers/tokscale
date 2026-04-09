@@ -635,12 +635,19 @@ const ErrorBanner = styled.div`
   gap: 8px;
 `;
 
-const SortToggleContainer = styled.div`
+const ControlsRow = styled.div`
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 24px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
+`;
+
+const SortToggleContainer = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
 `;
 
 const SortLabel = styled.span`
@@ -649,6 +656,33 @@ const SortLabel = styled.span`
   font-weight: 500;
 `;
 
+const RefreshContainer = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const RefreshOptions = styled.div`
+  display: flex;
+  gap: 4px;
+`;
+
+const RefreshOption = styled.button<{ $active: boolean }>`
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid ${({ $active }) => ($active ? "var(--color-primary)" : "var(--color-border-default)")};
+  background: ${({ $active }) => ($active ? "var(--color-primary)" : "transparent")};
+  color: ${({ $active }) => ($active ? "#fff" : "var(--color-fg-muted)")};
+  cursor: pointer;
+  transition: all 0.15s;
+
+  &:hover {
+    border-color: var(--color-primary);
+    color: ${({ $active }) => ($active ? "#fff" : "var(--color-primary)")};
+  }
+`;
 
 const HoverTooltip = styled.span`
   position: relative;
@@ -857,6 +891,14 @@ const LeaderboardRow = memo(function LeaderboardRow({
   );
 });
 
+const REFRESH_PRESETS: { label: string; value: number | null }[] = [
+  { label: "Off", value: null },
+  { label: "1m", value: 60_000 },
+  { label: "5m", value: 300_000 },
+  { label: "30m", value: 1_800_000 },
+  { label: "1h", value: 3_600_000 },
+];
+
 export default function LeaderboardClient({ initialData, currentUser, initialSortBy, initialUserRank }: LeaderboardClientProps) {
   const router = useRouter();
   const selfHostedUrl = getSelfHostedUrl();
@@ -870,7 +912,7 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
   const [currentUserRank, setCurrentUserRank] = useState<LeaderboardUser | null>(initialUserRank);
   const [currentUserRankError, setCurrentUserRankError] = useState(false);
 
-  const { leaderboardSortBy, setLeaderboardSort, mounted } = useSettings();
+  const { leaderboardSortBy, setLeaderboardSort, refreshInterval, setRefreshInterval, mounted } = useSettings();
   
   const effectiveSortBy = mounted ? leaderboardSortBy : initialSortBy;
 
@@ -963,6 +1005,22 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
     fetchData(period, page, effectiveSortBy, abortController.signal);
     return () => abortController.abort();
   }, [period, page, effectiveSortBy]);
+
+  // Auto-refresh polling
+  useEffect(() => {
+    if (!refreshInterval) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      fetchData(period, page, effectiveSortBy);
+      if (currentUser) {
+        fetch(`/api/leaderboard/user/${currentUser.username}?period=${period}&sortBy=${effectiveSortBy}`)
+          .then((res) => res.ok ? res.json() : null)
+          .then((userData) => { if (userData) setCurrentUserRank(userData); })
+          .catch(() => {});
+      }
+    }, refreshInterval);
+    return () => clearInterval(timer);
+  }, [refreshInterval, period, page, effectiveSortBy, currentUser]);
 
   useEffect(() => {
     if (data.pagination.totalPages > 0 && page > data.pagination.totalPages) {
@@ -1079,15 +1137,32 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
         />
       </TabSection>
 
-      <SortToggleContainer>
-        <SortLabel>Sort by:</SortLabel>
-        <Switch
-          checked={effectiveSortBy === 'cost'}
-          onChange={(checked) => setLeaderboardSort(checked ? 'cost' : 'tokens')}
-          leftLabel="Tokens"
-          rightLabel="Cost"
-        />
-      </SortToggleContainer>
+      <ControlsRow>
+        <SortToggleContainer>
+          <SortLabel>Sort by:</SortLabel>
+          <Switch
+            checked={effectiveSortBy === 'cost'}
+            onChange={(checked) => setLeaderboardSort(checked ? 'cost' : 'tokens')}
+            leftLabel="Tokens"
+            rightLabel="Cost"
+          />
+        </SortToggleContainer>
+
+        <RefreshContainer>
+          <SortLabel>Auto Refresh:</SortLabel>
+          <RefreshOptions>
+            {REFRESH_PRESETS.map(({ label, value }) => (
+              <RefreshOption
+                key={label}
+                $active={refreshInterval === value}
+                onClick={() => setRefreshInterval(value)}
+              >
+                {label}
+              </RefreshOption>
+            ))}
+          </RefreshOptions>
+        </RefreshContainer>
+      </ControlsRow>
 
       {isLoading ? (
         <LeaderboardSkeleton />
