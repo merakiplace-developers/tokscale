@@ -159,7 +159,7 @@ function buildPeriodLeaderboardData(
   limit: number,
   period: Period,
   sortBy: SortBy = "tokens"
-): LeaderboardData {
+): Omit<LeaderboardData, "dateRange" | "timezone"> {
   const offset = (page - 1) * limit;
   const aggregatedUsers = aggregatePeriodRows(rows, sortBy);
   const pagedUsers = aggregatedUsers.slice(offset, offset + limit);
@@ -261,7 +261,12 @@ async function fetchLeaderboardData(
 ): Promise<LeaderboardData> {
   if (period !== "all") {
     const rows = await fetchPeriodLeaderboardRows(period);
-    return buildPeriodLeaderboardData(rows, page, limit, period, sortBy);
+    const result = buildPeriodLeaderboardData(rows, page, limit, period, sortBy);
+    return {
+      ...result,
+      dateRange: getPeriodDateRange(period),
+      timezone: LEADERBOARD_TIMEZONE,
+    };
   }
 
   const offset = (page - 1) * limit;
@@ -347,6 +352,8 @@ async function fetchLeaderboardData(
     },
     period,
     sortBy,
+    dateRange: null,
+    timezone: LEADERBOARD_TIMEZONE,
   };
 }
 

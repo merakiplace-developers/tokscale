@@ -10,6 +10,7 @@ import { formatCurrency, formatNumber } from "@/lib/utils";
 import { useSettings } from "@/lib/useSettings";
 import { Switch } from "@/components/Switch";
 import { getSelfHostedUrl } from "@/lib/selfHosted";
+import { formatLeaderboardDateRange } from "@/lib/leaderboard/formatDateRange";
 
 const Section = styled.div`
   margin-bottom: 40px;
@@ -67,6 +68,13 @@ const StatValuePrimary = styled(StatValue)`
 
 const TabSection = styled.div`
   margin-bottom: 24px;
+`;
+
+const DateRangeLabel = styled.p`
+  font-size: 13px;
+  color: var(--color-fg-muted);
+  margin-top: 8px;
+  margin-bottom: 0;
 `;
 
 const TableContainer = styled.div`
@@ -798,6 +806,8 @@ export interface LeaderboardData {
   };
   period: Period;
   sortBy?: 'tokens' | 'cost';
+  dateRange?: { start: string; end: string } | null;
+  timezone?: string;
 }
 
 interface LeaderboardClientProps {
@@ -1136,6 +1146,11 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
             setPage(1);
           }}
         />
+        {data.dateRange && (
+          <DateRangeLabel>
+            {formatLeaderboardDateRange(data.dateRange, data.timezone)}
+          </DateRangeLabel>
+        )}
       </TabSection>
 
       <ControlsRow>

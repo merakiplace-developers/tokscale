@@ -34,4 +34,6 @@ export interface LeaderboardData {
   };
   period: Period;
   sortBy: SortBy;
+  dateRange: { start: string; end: string } | null;
+  timezone: string;
 }
