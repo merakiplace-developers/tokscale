@@ -1137,7 +1137,7 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
           tabs={[
             { id: "all" as Period, label: "All Time" },
             { id: "month" as Period, label: "This Month" },
-            { id: "week" as Period, label: "This Week" },
+            { id: "week" as Period, label: "7 Days" },
             { id: "day" as Period, label: "Today" },
           ]}
           activeTab={period}
