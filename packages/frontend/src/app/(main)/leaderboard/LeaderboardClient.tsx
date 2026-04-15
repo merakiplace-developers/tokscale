@@ -969,9 +969,11 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
     return () => abortController.abort();
   }, [currentUser, period, effectiveSortBy]);
 
-  const fetchData = (targetPeriod: Period, targetPage: number, targetSortBy: 'tokens' | 'cost', signal?: AbortSignal) => {
-    setIsLoading(true);
-    setError(null);
+  const fetchData = (targetPeriod: Period, targetPage: number, targetSortBy: 'tokens' | 'cost', signal?: AbortSignal, silent = false) => {
+    if (!silent) {
+      setIsLoading(true);
+      setError(null);
+    }
     fetch(`/api/leaderboard?period=${targetPeriod}&page=${targetPage}&limit=50&sortBy=${targetSortBy}`, { signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -982,10 +984,10 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
           throw new Error("Invalid response format");
         }
         setData(result);
-        setIsLoading(false);
+        if (!silent) setIsLoading(false);
       })
       .catch((err) => {
-        if (err.name !== "AbortError") {
+        if (err.name !== "AbortError" && !silent) {
           setError(err.message || "Failed to load");
           setIsLoading(false);
         }
@@ -1021,7 +1023,7 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
     if (!refreshInterval) return;
     const timer = setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      fetchData(period, page, effectiveSortBy);
+      fetchData(period, page, effectiveSortBy, undefined, true);
       if (currentUser) {
         fetch(`/api/leaderboard/user/${currentUser.username}?period=${period}&sortBy=${effectiveSortBy}`)
           .then((res) => res.ok ? res.json() : null)
