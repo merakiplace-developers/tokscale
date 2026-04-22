@@ -15,6 +15,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
+// NOTE: When adding a new public-schema table, the follow-up migration MUST
+// run `ALTER TABLE "<name>" ENABLE ROW LEVEL SECURITY;`. Supabase exposes the
+// public schema via PostgREST under the anon/authenticated API keys; RLS is
+// what keeps those keys from reading/writing these tables. See migration
+// 0006_enable_rls for the baseline.
+
 // ============================================================================
 // USERS
 // ============================================================================
