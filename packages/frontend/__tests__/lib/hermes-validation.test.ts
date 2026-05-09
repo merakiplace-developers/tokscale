@@ -134,13 +134,19 @@ describe("hermes client validation regression", () => {
     expect(result.data?.summary.clients).toContain("hermes");
   });
 
-  // Note: only clients present in SUPPORTED_SOURCES (Zod allowlist) are tested.
-  // Upstream defines additional Rust ClientId variants (zed, antigravity, codebuff, goose)
-  // that have not yet been added to the frontend submission allowlist.
+  // All clients defined in the Rust ClientId enum (clients.rs) that the
+  // upstream/local CLI may emit are also accepted by the frontend Zod
+  // allowlist. Adding a new ClientId without updating SUPPORTED_SOURCES
+  // breaks this contract — keep these in sync.
   it.each([
     "copilot",
     "crush",
     "hermes",
+    "goose",
+    "codebuff",
+    "antigravity",
+    "zed",
+    "anthropic-api",
   ])("accepts %s as a valid client", (clientName) => {
     const result = validateSubmission(makeBaseSubmission(clientName));
     expect(result.errors).toEqual([]);

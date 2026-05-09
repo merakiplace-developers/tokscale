@@ -31,7 +31,7 @@ export function SourceLogo({ sourceId, height = 14, className = "" }: SourceLogo
       case "codex":
         return "/assets/logos/openai.jpg";
       case "copilot":
-        return "https://raw.githubusercontent.com/junhoyeo/tokscale/main/.github/assets/client-copilot.jpg";
+        return "/assets/logos/copilot.jpg";
       case "gemini":
         return "/assets/logos/gemini.png";
       case "cursor":
@@ -58,7 +58,17 @@ export function SourceLogo({ sourceId, height = 14, className = "" }: SourceLogo
       case "mux":
         return "/assets/logos/mux.png";
       case "crush":
-        return "https://raw.githubusercontent.com/junhoyeo/tokscale/main/.github/assets/client-crush.png";
+        return "/assets/logos/crush.png";
+      case "goose":
+        return "/assets/logos/goose.png";
+      case "codebuff":
+        return "/assets/logos/codebuff.png";
+      case "antigravity":
+        return "/assets/logos/antigravity.png";
+      case "zed":
+        return "/assets/logos/zed.webp";
+      case "anthropic-api":
+        return "/assets/logos/claude.jpg";
       case "synthetic":
         return "/assets/logos/synthetic.png";
       default:

@@ -1,4 +1,4 @@
-export type ClientType = "opencode" | "claude" | "codex" | "copilot" | "gemini" | "cursor" | "amp" | "droid" | "openclaw" | "hermes" | "pi" | "kimi" | "qwen" | "roocode" | "kilocode" | "kilo" | "mux" | "crush" | "synthetic";
+export type ClientType = "opencode" | "claude" | "codex" | "copilot" | "gemini" | "cursor" | "amp" | "droid" | "openclaw" | "hermes" | "pi" | "kimi" | "qwen" | "roocode" | "kilocode" | "kilo" | "mux" | "crush" | "goose" | "codebuff" | "antigravity" | "zed" | "anthropic-api" | "synthetic";
 
 export interface TokenBreakdown {
   input: number;

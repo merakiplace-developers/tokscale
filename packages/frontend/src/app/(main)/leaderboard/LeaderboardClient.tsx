@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo, memo, useCallback } from "react";
+import Image from "next/image";
 import { useRouter } from "nextjs-toploader/app";
 import styled from "styled-components";
 import { CopyIcon, CheckIcon, SearchIcon, XIcon } from "@/components/ui/Icons";
@@ -927,11 +928,12 @@ const LeaderboardRow = memo(function LeaderboardRow({
       </TableCell>
       <TableCell>
         <UserContainer>
-          <img
+          <Image
             src={user.avatarUrl || "/default-avatar.svg"}
             alt={user.username}
             width={40}
             height={40}
+            unoptimized
             style={{ borderRadius: "50%", objectFit: "cover", flexShrink: 0, boxShadow: "0 0 0 1px rgba(255, 255, 255, 0.1)" }}
           />
           <UserInfo>
@@ -1183,11 +1185,12 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
       {currentUser && currentUserRank && (
         <CurrentUserCard>
           <CurrentUserInfo>
-            <img
+            <Image
               src={currentUser.avatarUrl || "/default-avatar.svg"}
               alt={currentUser.username}
               width={48}
               height={48}
+              unoptimized
               style={{ borderRadius: "50%", objectFit: "cover", flexShrink: 0, boxShadow: "0 0 0 1px rgba(255, 255, 255, 0.1)" }}
             />
             <CurrentUserDetails>

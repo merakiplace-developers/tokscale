@@ -47,6 +47,7 @@ export const SOURCE_DISPLAY_NAMES: Record<string, string> = {
   goose: "Goose",
   antigravity: "Antigravity",
   zed: "Zed Agent",
+  "anthropic-api": "Anthropic API",
   synthetic: "Synthetic",
 };
 
@@ -75,6 +76,7 @@ export const SOURCE_LOGOS: Record<string, string> = {
   goose: `${GITHUB_CDN_BASE}/client-goose.png`,
   antigravity: `${GITHUB_CDN_BASE}/client-antigravity.png`,
   zed: `${GITHUB_CDN_BASE}/client-zed.webp`,
+  "anthropic-api": `${GITHUB_CDN_BASE}/client-claude.jpg`,
   synthetic: `${GITHUB_CDN_BASE}/client-synthetic.png`,
 };
 
@@ -101,6 +103,7 @@ export const SOURCE_COLORS: Record<string, string> = {
   goose: "#64B4DC",
   antigravity: "#6366F1",
   zed: "#084CCF",
+  "anthropic-api": "#D97706",
   synthetic: "#4ADE80",
 };
 
