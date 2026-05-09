@@ -29,10 +29,7 @@ fn atomic_write_file(path: &std::path::Path, contents: &str) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    let temp_name = format!(
-        ".tmp-anthropic-{}",
-        std::process::id()
-    );
+    let temp_name = format!(".tmp-anthropic-{}", std::process::id());
     let temp_path = parent.join(temp_name);
 
     #[cfg(unix)]
@@ -136,17 +133,16 @@ pub struct SyncResult {
     pub error: Option<String>,
 }
 
-pub async fn sync_anthropic_cache(
-    since: Option<String>,
-    until: Option<String>,
-) -> SyncResult {
+pub async fn sync_anthropic_cache(since: Option<String>, until: Option<String>) -> SyncResult {
     let creds = match load_credentials() {
         Some(c) => c,
         None => {
             return SyncResult {
                 synced: false,
                 rows: 0,
-                error: Some("Not authenticated. Run 'tokscale sync-api --anthropic' to set up.".to_string()),
+                error: Some(
+                    "Not authenticated. Run 'tokscale sync-api --anthropic' to set up.".to_string(),
+                ),
             };
         }
     };
