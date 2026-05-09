@@ -4795,6 +4795,7 @@ mod tests {
             goose: true,
             antigravity: true,
             zed: true,
+            anthropic_api: true,
             synthetic: true,
             ..ClientFlags::default()
         };
@@ -4827,6 +4828,7 @@ mod tests {
             "goose",
             "antigravity",
             "zed",
+            "anthropic-api",
             "synthetic",
         ] {
             assert!(
