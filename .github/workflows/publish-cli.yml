@@ -29,7 +29,7 @@ jobs:
     outputs:
       version: ${{ steps.bump.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Calculate version
         id: bump
@@ -91,10 +91,39 @@ jobs:
           # Update packages/tokscale/package.json (version + @tokscale/cli dependency)
           jq --arg v "$NEW_VERSION" '.version = $v | .dependencies["@tokscale/cli"] = $v' packages/tokscale/package.json > tmp.json && mv tmp.json packages/tokscale/package.json
           echo "✅ Updated packages/tokscale/package.json"
+
+          # Update Rust workspace version so the published binary reports the same release version
+          python3 - <<'PY' "$NEW_VERSION"
+          import pathlib
+          import re
+          import sys
+
+          new_version = sys.argv[1]
+          path = pathlib.Path("Cargo.toml")
+          content = path.read_text()
+          updated, count = re.subn(
+              r'(\[workspace\.package\](?:(?!^\[).|\n)*?^version = ")([^"]+)(")',
+              rf"\g<1>{new_version}\g<3>",
+              content,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if count != 1:
+              raise SystemExit("Failed to update [workspace.package] version in Cargo.toml")
+          path.write_text(updated)
+          PY
+          echo "✅ Updated Cargo.toml workspace version"
           
           # Verify all versions are updated
           echo ""
           echo "📋 Verification:"
+          echo "  Rust workspace:  $(python3 - <<'PY'
+          import pathlib, re
+          content = pathlib.Path('Cargo.toml').read_text()
+          match = re.search(r'\[workspace\.package\](?:(?!^\[).|\n)*?^version = "([^"]+)"', content, re.MULTILINE)
+          print(match.group(1) if match else 'missing')
+          PY
+          )"
           echo "  @tokscale/cli:   $(jq -r '.version' packages/cli/package.json)"
           echo "  tokscale:        $(jq -r '.version' packages/tokscale/package.json)"
           echo "  cli -> darwin arm64: $(jq -r '.optionalDependencies["@tokscale/cli-darwin-arm64"]' packages/cli/package.json)"
@@ -103,15 +132,18 @@ jobs:
           for pkg in cli-darwin-arm64 cli-darwin-x64 cli-linux-x64-gnu cli-linux-x64-musl cli-linux-arm64-gnu cli-linux-arm64-musl cli-win32-x64-msvc cli-win32-arm64-msvc; do
             echo "    $pkg: $(jq -r '.version' "packages/$pkg/package.json")"
           done
+
+          bash scripts/check-version-coherence.sh --expect-version "$NEW_VERSION"
           
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "📝 Version bump prepared (will commit after successful publish)"
 
-      - name: Upload bumped package.json files
-        uses: actions/upload-artifact@v4
+      - name: Upload bumped manifest files
+        uses: actions/upload-artifact@v6
         with:
-          name: bumped-packages
+          name: bumped-manifests
           path: |
+            Cargo.toml
             packages/cli/package.json
             packages/cli-darwin-arm64/package.json
             packages/cli-darwin-x64/package.json
@@ -190,16 +222,16 @@ jobs:
             strip: ""
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download bumped package.json files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
-          name: bumped-packages
-          path: packages/
+          name: bumped-manifests
+          path: .
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
 
@@ -209,7 +241,7 @@ jobs:
           targets: ${{ matrix.settings.target }}
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/
@@ -246,7 +278,7 @@ jobs:
         run: ${{ matrix.settings.strip }}
 
       - name: Upload CLI binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.settings.artifact_name }}
           path: target/${{ matrix.settings.target }}/release/${{ matrix.settings.bin_name }}
@@ -294,13 +326,13 @@ jobs:
             binary_name: tokscale.exe
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download bumped package.json files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
-          name: bumped-packages
-          path: packages/
+          name: bumped-manifests
+          path: .
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -308,7 +340,7 @@ jobs:
           bun-version: 1.1.38
 
       - name: Download CLI binary artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ${{ matrix.settings.artifact_name }}
           path: artifacts/${{ matrix.settings.package_dir }}
@@ -337,13 +369,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download bumped package.json files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
-          name: bumped-packages
-          path: packages/
+          name: bumped-manifests
+          path: .
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -372,13 +404,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download bumped package.json files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
-          name: bumped-packages
-          path: packages/
+          name: bumped-manifests
+          path: .
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -399,7 +431,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: true
@@ -407,10 +439,10 @@ jobs:
           fetch-tags: true
 
       - name: Download bumped package.json files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
-          name: bumped-packages
-          path: packages/
+          name: bumped-manifests
+          path: .
 
       - name: Configure Git
         run: |
@@ -422,7 +454,7 @@ jobs:
           NEW_VERSION="${{ needs.bump-versions.outputs.version }}"
           echo "📦 Committing version bump to $NEW_VERSION"
           
-          git add packages/cli/package.json packages/cli-darwin-arm64/package.json packages/cli-darwin-x64/package.json packages/cli-linux-x64-gnu/package.json packages/cli-linux-x64-musl/package.json packages/cli-linux-arm64-gnu/package.json packages/cli-linux-arm64-musl/package.json packages/cli-win32-x64-msvc/package.json packages/cli-win32-arm64-msvc/package.json packages/tokscale/package.json
+          git add Cargo.toml packages/cli/package.json packages/cli-darwin-arm64/package.json packages/cli-darwin-x64/package.json packages/cli-linux-x64-gnu/package.json packages/cli-linux-x64-musl/package.json packages/cli-linux-arm64-gnu/package.json packages/cli-linux-arm64-musl/package.json packages/cli-win32-x64-msvc/package.json packages/cli-win32-arm64-msvc/package.json packages/tokscale/package.json
           git commit -m "chore: bump version to $NEW_VERSION"
           git push
           

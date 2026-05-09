@@ -935,7 +935,9 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
 
   useEffect(() => {
     if (!currentUser) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentUserRank(null);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentUserRankError(false);
       return;
     }
@@ -1014,6 +1016,7 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
     prevSortByRef.current = effectiveSortBy;
 
     const abortController = new AbortController();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData(period, page, effectiveSortBy, abortController.signal);
     return () => abortController.abort();
   }, [period, page, effectiveSortBy]);
@@ -1036,6 +1039,7 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
 
   useEffect(() => {
     if (data.pagination.totalPages > 0 && page > data.pagination.totalPages) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPage(data.pagination.totalPages);
     }
   }, [data.pagination.totalPages, page]);

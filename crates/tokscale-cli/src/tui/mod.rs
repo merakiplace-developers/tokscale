@@ -1,9 +1,11 @@
 mod app;
 mod cache;
 pub mod client_ui;
+mod colors;
 pub mod config;
 pub mod data;
 mod event;
+mod export;
 pub mod settings;
 mod themes;
 mod ui;
@@ -31,10 +33,23 @@ use anyhow::Result;
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen, SetTitle,
+    },
 };
 use ratatui::prelude::*;
 use tokscale_core::ClientId;
+
+use crate::ClientFilter;
+
+fn decide_initial_data(load_result: CacheResult) -> (Option<UsageData>, bool) {
+    let cached_data = match load_result {
+        CacheResult::Fresh(data) | CacheResult::Stale(data) => Some(data),
+        CacheResult::Miss => None,
+    };
+
+    (cached_data, true)
+}
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
@@ -64,29 +79,24 @@ pub fn run(
         initial_tab,
     };
 
-    let mut enabled_clients = HashSet::new();
-    let mut include_synthetic = false;
-    if let Some(ref cli_clients) = clients {
-        for client_str in cli_clients {
-            if client_str.eq_ignore_ascii_case("synthetic") {
-                include_synthetic = true;
-            } else if let Some(client) = ClientId::from_str(client_str) {
-                enabled_clients.insert(client);
-            }
-        }
+    // Build the unified filter set used by the cache key, the App
+    // constructor, and the background loader. We mirror the same
+    // resolution rules App::new_with_cached_data uses so the cache
+    // lookup and the in-app state always agree. Drift between them
+    // makes every launch a stale-cache hit instead of a fresh one.
+    let enabled_clients: HashSet<ClientFilter> = if let Some(ref cli_clients) = clients {
+        cli_clients
+            .iter()
+            .filter_map(|s| ClientFilter::from_filter_str(&s.to_lowercase()))
+            .collect()
     } else {
-        for client in ClientId::iter() {
-            enabled_clients.insert(client);
-        }
-    }
-
-    // Single file read: load cache and check freshness in one pass
-    let (cached_data, cache_is_stale) = match load_cache(&enabled_clients, include_synthetic) {
-        CacheResult::Fresh(data) => (Some(data), false),
-        CacheResult::Stale(data) => (Some(data), true),
-        CacheResult::Miss => (None, true),
+        ClientFilter::default_set()
     };
-    let has_cached_data = cached_data.is_some();
+
+    // Single file read: load cache and check freshness in one pass.
+    let initial_group_by = tokscale_core::GroupBy::Model;
+    let (cached_data, needs_background_load) =
+        decide_initial_data(load_cache(&enabled_clients, &initial_group_by));
 
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
@@ -97,8 +107,11 @@ pub fn run(
     enable_raw_mode()?;
     let mut stdout = io::stdout();
 
+    let _ = execute!(stdout, SetTitle("Tokscale"));
+
     if let Err(e) = execute!(stdout, EnterAlternateScreen, EnableMouseCapture) {
         let _ = disable_raw_mode();
+        let _ = execute!(stdout, SetTitle(""));
         return Err(e.into());
     }
 
@@ -121,18 +134,24 @@ pub fn run(
     };
 
     let (bg_tx, bg_rx) = mpsc::channel::<Result<UsageData>>();
-    let needs_background_load = !has_cached_data || cache_is_stale;
 
     if needs_background_load {
         app.set_background_loading(true);
 
         let tx = bg_tx.clone();
-        let bg_clients: Vec<ClientId> = enabled_clients.iter().copied().collect();
+        // Project the filter set into the (clients, include_synthetic)
+        // pair the loader still consumes. Keeping the projection here
+        // (instead of inside DataLoader) avoids touching tokscale-core's
+        // public API in this PR.
+        let bg_clients: Vec<ClientId> = enabled_clients
+            .iter()
+            .filter_map(|f| f.to_client_id())
+            .collect();
+        let bg_include_synthetic = enabled_clients.contains(&ClientFilter::Synthetic);
         let bg_since = since.clone();
         let bg_until = until.clone();
         let bg_year = year.clone();
         let bg_enabled_clients = enabled_clients.clone();
-        let bg_include_synthetic = include_synthetic;
         let bg_group_by = app.group_by.borrow().clone();
 
         thread::spawn(move || {
@@ -140,7 +159,7 @@ pub fn run(
             let result = loader.load(&bg_clients, &bg_group_by, bg_include_synthetic);
 
             if let Ok(ref data) = result {
-                save_cached_data(data, &bg_enabled_clients, bg_include_synthetic);
+                save_cached_data(data, &bg_enabled_clients, &bg_group_by);
             }
 
             let _ = tx.send(result);
@@ -172,7 +191,12 @@ pub fn run(
 }
 
 fn restore_terminal_best_effort() {
-    let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+    let _ = execute!(
+        io::stdout(),
+        LeaveAlternateScreen,
+        DisableMouseCapture,
+        SetTitle("")
+    );
     let _ = disable_raw_mode();
 }
 
@@ -181,7 +205,8 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) {
     let _ = execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
-        DisableMouseCapture
+        DisableMouseCapture,
+        SetTitle("")
     );
     let _ = terminal.show_cursor();
 }
@@ -237,19 +262,20 @@ fn run_loop_with_background(
             app.set_background_loading(true);
 
             let tx = bg_tx.clone();
-            let clients: Vec<ClientId> = app.enabled_clients.borrow().iter().copied().collect();
+            // Boundary projection: see [`run`] above for the shape rationale.
+            let clients = app.scan_clients();
+            let include_synthetic = app.include_synthetic();
             let since = app.data_loader.since.clone();
             let until = app.data_loader.until.clone();
             let year = app.data_loader.year.clone();
             let enabled_clients = app.enabled_clients.borrow().clone();
-            let include_synthetic = *app.include_synthetic.borrow();
             let group_by = app.group_by.borrow().clone();
 
             thread::spawn(move || {
                 let loader = DataLoader::with_filters(None, since, until, year);
                 let result = loader.load(&clients, &group_by, include_synthetic);
                 if let Ok(ref data) = result {
-                    save_cached_data(data, &enabled_clients, include_synthetic);
+                    save_cached_data(data, &enabled_clients, &group_by);
                 }
                 let _ = tx.send(result);
             });
@@ -297,6 +323,11 @@ pub fn test_data_loading() -> Result<()> {
         ClientId::Qwen,
         ClientId::RooCode,
         ClientId::KiloCode,
+        ClientId::Kilo,
+        ClientId::Mux,
+        ClientId::Crush,
+        ClientId::Hermes,
+        ClientId::Codebuff,
     ];
 
     let data = loader.load(&all_clients, &tokscale_core::GroupBy::default(), false)?;
@@ -319,4 +350,26 @@ pub fn test_data_loading() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn launches_with_24h_old_cache_renders_immediately() {
+        let (cached_data, needs_background_load) =
+            decide_initial_data(CacheResult::Stale(UsageData::default()));
+
+        assert!(cached_data.is_some());
+        assert!(needs_background_load);
+    }
+
+    #[test]
+    fn miss_renders_empty_until_background_completes() {
+        let (cached_data, needs_background_load) = decide_initial_data(CacheResult::Miss);
+
+        assert!(cached_data.is_none());
+        assert!(needs_background_load);
+    }
 }
