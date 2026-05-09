@@ -327,7 +327,12 @@ pub fn test_data_loading() -> Result<()> {
         ClientId::Mux,
         ClientId::Crush,
         ClientId::Hermes,
+        ClientId::Copilot,
+        ClientId::Goose,
         ClientId::Codebuff,
+        ClientId::Antigravity,
+        ClientId::Zed,
+        ClientId::AnthropicApi,
     ];
 
     let data = loader.load(&all_clients, &tokscale_core::GroupBy::default(), false)?;
