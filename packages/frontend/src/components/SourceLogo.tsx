@@ -2,8 +2,6 @@
 
 import styled from "styled-components";
 
-/* eslint-disable @next/next/no-img-element */
-
 interface SourceLogoProps {
   sourceId: string;
   height?: number;
@@ -32,6 +30,8 @@ export function SourceLogo({ sourceId, height = 14, className = "" }: SourceLogo
         return "/assets/logos/claude.jpg";
       case "codex":
         return "/assets/logos/openai.jpg";
+      case "copilot":
+        return "/assets/logos/copilot.jpg";
       case "gemini":
         return "/assets/logos/gemini.png";
       case "cursor":
@@ -42,6 +42,8 @@ export function SourceLogo({ sourceId, height = 14, className = "" }: SourceLogo
         return "/assets/logos/droid.png";
       case "openclaw":
         return "/assets/logos/openclaw.jpg";
+      case "hermes":
+        return "/assets/logos/hermes.png";
       case "pi":
         return "/assets/logos/pi.png";
       case "kimi":
@@ -51,9 +53,22 @@ export function SourceLogo({ sourceId, height = 14, className = "" }: SourceLogo
       case "roocode":
         return "/assets/logos/roocode.png";
       case "kilocode":
+      case "kilo":
         return "/assets/logos/kilocode.png";
       case "mux":
         return "/assets/logos/mux.png";
+      case "crush":
+        return "/assets/logos/crush.png";
+      case "goose":
+        return "/assets/logos/goose.png";
+      case "codebuff":
+        return "/assets/logos/codebuff.png";
+      case "antigravity":
+        return "/assets/logos/antigravity.png";
+      case "zed":
+        return "/assets/logos/zed.webp";
+      case "anthropic-api":
+        return "/assets/logos/claude.jpg";
       case "synthetic":
         return "/assets/logos/synthetic.png";
       default:

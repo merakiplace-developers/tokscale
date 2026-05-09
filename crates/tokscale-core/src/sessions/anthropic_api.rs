@@ -100,8 +100,16 @@ mod tests {
     fn test_parse_anthropic_api_csv() {
         let mut f = NamedTempFile::new().unwrap();
         writeln!(f, "Date,Model,Input,Output,CacheRead,CacheWrite,Cost").unwrap();
-        writeln!(f, "2025-03-01,claude-sonnet-4-20250514,1000,500,200,100,0.0150").unwrap();
-        writeln!(f, "2025-03-01,claude-haiku-3-5-20241022,2000,800,0,0,0.0040").unwrap();
+        writeln!(
+            f,
+            "2025-03-01,claude-sonnet-4-20250514,1000,500,200,100,0.0150"
+        )
+        .unwrap();
+        writeln!(
+            f,
+            "2025-03-01,claude-haiku-3-5-20241022,2000,800,0,0,0.0040"
+        )
+        .unwrap();
         f.flush().unwrap();
 
         let messages = parse_anthropic_api_file(f.path());

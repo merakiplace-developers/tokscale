@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -8,10 +8,15 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use ratatui::layout::Rect;
 use tokscale_core::ClientId;
 
-use super::data::{AgentUsage, DailyUsage, DataLoader, ModelUsage, UsageData};
+use crate::ClientFilter;
+
+use ratatui::style::Color;
+
+use super::data::{AgentUsage, DailyUsage, DataLoader, HourlyUsage, ModelUsage, UsageData};
 use super::settings::Settings;
 use super::themes::{Theme, ThemeName};
 use super::ui::dialog::{ClientPickerDialog, DialogStack};
+use super::ui::widgets::{get_model_color, get_provider_from_model, get_provider_shade};
 
 /// Configuration for TUI initialization
 pub struct TuiConfig {
@@ -25,11 +30,12 @@ pub struct TuiConfig {
     pub initial_tab: Option<Tab>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Tab {
     Overview,
     Models,
     Daily,
+    Hourly,
     Stats,
     Agents,
 }
@@ -40,6 +46,7 @@ impl Tab {
             Tab::Overview,
             Tab::Models,
             Tab::Daily,
+            Tab::Hourly,
             Tab::Stats,
             Tab::Agents,
         ]
@@ -50,6 +57,7 @@ impl Tab {
             Tab::Overview => "Overview",
             Tab::Models => "Models",
             Tab::Daily => "Daily",
+            Tab::Hourly => "Hourly",
             Tab::Stats => "Stats",
             Tab::Agents => "Agents",
         }
@@ -60,6 +68,7 @@ impl Tab {
             Tab::Overview => "Ovw",
             Tab::Models => "Mod",
             Tab::Daily => "Day",
+            Tab::Hourly => "Hr",
             Tab::Stats => "Sta",
             Tab::Agents => "Agt",
         }
@@ -69,7 +78,8 @@ impl Tab {
         match self {
             Tab::Overview => Tab::Models,
             Tab::Models => Tab::Daily,
-            Tab::Daily => Tab::Stats,
+            Tab::Daily => Tab::Hourly,
+            Tab::Hourly => Tab::Stats,
             Tab::Stats => Tab::Agents,
             Tab::Agents => Tab::Overview,
         }
@@ -80,10 +90,18 @@ impl Tab {
             Tab::Overview => Tab::Agents,
             Tab::Models => Tab::Overview,
             Tab::Daily => Tab::Models,
-            Tab::Stats => Tab::Daily,
+            Tab::Hourly => Tab::Daily,
+            Tab::Stats => Tab::Hourly,
             Tab::Agents => Tab::Stats,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChartGranularity {
+    #[default]
+    Daily,
+    Hourly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +109,13 @@ pub enum SortField {
     Cost,
     Tokens,
     Date,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HourlyViewMode {
+    #[default]
+    Table,
+    Profile,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,11 +144,18 @@ pub struct App {
     pub data: UsageData,
     pub data_loader: DataLoader,
 
-    pub enabled_clients: Rc<RefCell<HashSet<ClientId>>>,
-    pub include_synthetic: Rc<RefCell<bool>>,
+    /// Set of clients currently selected in the source picker. The
+    /// `Synthetic` variant is part of the same set so dialog code can
+    /// uniformly toggle/inspect every option without a separate boolean.
+    /// Code that talks to `tokscale_core` (which still expects a
+    /// `Vec<ClientId>` plus a `bool include_synthetic`) projects this set
+    /// at the boundary via `App::scan_clients` and `App::include_synthetic`.
+    pub enabled_clients: Rc<RefCell<HashSet<ClientFilter>>>,
     pub group_by: Rc<RefCell<tokscale_core::GroupBy>>,
     pub sort_field: SortField,
     pub sort_direction: SortDirection,
+    tab_sort_state: HashMap<Tab, (SortField, SortDirection)>,
+    pub chart_granularity: ChartGranularity,
 
     pub scroll_offset: usize,
     pub selected_index: usize,
@@ -153,6 +185,10 @@ pub struct App {
     pub dialog_stack: DialogStack,
 
     pub dialog_needs_reload: Rc<RefCell<bool>>,
+
+    pub hourly_view_mode: HourlyViewMode,
+
+    pub model_shade_map: HashMap<String, Color>,
 }
 
 impl App {
@@ -164,22 +200,23 @@ impl App {
             .unwrap_or_else(|_| settings.theme_name());
         let theme = Theme::from_name(theme_name);
 
-        let mut enabled_clients = HashSet::new();
-        let mut include_synthetic = false;
-
-        if let Some(ref cli_clients) = config.clients {
-            for client_str in cli_clients {
-                if client_str.eq_ignore_ascii_case("synthetic") {
-                    include_synthetic = true;
-                } else if let Some(client) = ClientId::from_str(client_str) {
-                    enabled_clients.insert(client);
-                }
-            }
+        let enabled_clients: HashSet<ClientFilter> = if let Some(ref cli_clients) = config.clients {
+            // CLI-provided filter list. Each entry is the canonical
+            // lowercase id (`opencode`, `claude`, ..., `synthetic`).
+            // Unknown ids are dropped silently; the CLI parser already
+            // validated against `ClientFilter` so this lookup should be
+            // total in practice.
+            cli_clients
+                .iter()
+                .filter_map(|s| ClientFilter::from_filter_str(&s.to_lowercase()))
+                .collect()
         } else {
-            for client in ClientId::iter() {
-                enabled_clients.insert(client);
-            }
-        }
+            // No filter → use the canonical default set (every real
+            // client, Synthetic opt-in only). MUST stay in sync with
+            // `run_warm_tui_cache()` so a fresh cache warm produces a
+            // fresh hit on the next no-filter launch.
+            ClientFilter::default_set()
+        };
 
         let auto_refresh_interval = if config.refresh > 0 {
             Duration::from_secs(config.refresh)
@@ -203,7 +240,7 @@ impl App {
         let dialog_stack = DialogStack::new(theme.clone());
         let dialog_needs_reload = Rc::new(RefCell::new(false));
 
-        Ok(Self {
+        let mut app = Self {
             should_quit: false,
             current_tab: config.initial_tab.unwrap_or(Tab::Overview),
             theme,
@@ -211,10 +248,11 @@ impl App {
             data,
             data_loader,
             enabled_clients: Rc::new(RefCell::new(enabled_clients)),
-            include_synthetic: Rc::new(RefCell::new(include_synthetic)),
             group_by: Rc::new(RefCell::new(tokscale_core::GroupBy::Model)),
             sort_field: SortField::Cost,
             sort_direction: SortDirection::Descending,
+            tab_sort_state: HashMap::new(),
+            chart_granularity: ChartGranularity::default(),
             scroll_offset: 0,
             selected_index: 0,
             max_visible_items: 20,
@@ -237,7 +275,11 @@ impl App {
             needs_reload: false,
             dialog_stack,
             dialog_needs_reload,
-        })
+            hourly_view_mode: HourlyViewMode::default(),
+            model_shade_map: HashMap::new(),
+        };
+        app.build_model_shade_map();
+        Ok(app)
     }
 
     pub fn set_background_loading(&mut self, loading: bool) {
@@ -248,7 +290,34 @@ impl App {
     pub fn update_data(&mut self, data: UsageData) {
         self.data = data;
         self.last_refresh = Instant::now();
+        self.build_model_shade_map();
         self.clamp_selection();
+    }
+
+    pub fn build_model_shade_map(&mut self) {
+        self.model_shade_map = super::colors::build_model_shade_map(&self.data.models);
+    }
+
+    pub fn model_color_for(&self, provider: &str, model: &str) -> Color {
+        let provider = if provider.is_empty() || provider.contains(", ") {
+            get_provider_from_model(model)
+        } else {
+            provider
+        };
+        let lookup_key = super::colors::model_shade_key(provider, model);
+        self.model_shade_map
+            .get(&lookup_key)
+            .copied()
+            .unwrap_or_else(|| get_provider_shade(provider, 0))
+    }
+
+    pub fn model_color(&self, model: &str) -> Color {
+        let provider = get_provider_from_model(model);
+        let lookup_key = super::colors::model_shade_key(provider, model);
+        self.model_shade_map
+            .get(&lookup_key)
+            .copied()
+            .unwrap_or_else(|| get_model_color(model))
     }
 
     pub fn has_visible_data(&self) -> bool {
@@ -304,19 +373,23 @@ impl App {
                 return true;
             }
             KeyCode::Tab => {
-                self.current_tab = self.current_tab.next();
+                let next = self.current_tab.next();
+                self.switch_tab(next);
                 self.reset_selection();
             }
             KeyCode::BackTab => {
-                self.current_tab = self.current_tab.prev();
+                let prev = self.current_tab.prev();
+                self.switch_tab(prev);
                 self.reset_selection();
             }
             KeyCode::Left => {
-                self.current_tab = self.current_tab.prev();
+                let prev = self.current_tab.prev();
+                self.switch_tab(prev);
                 self.reset_selection();
             }
             KeyCode::Right => {
-                self.current_tab = self.current_tab.next();
+                let next = self.current_tab.next();
+                self.switch_tab(next);
                 self.reset_selection();
             }
             KeyCode::Up => {
@@ -377,21 +450,30 @@ impl App {
             KeyCode::Char('s') => {
                 self.open_client_picker();
             }
+            KeyCode::Char('h') if self.current_tab == Tab::Overview => {
+                self.chart_granularity = match self.chart_granularity {
+                    ChartGranularity::Daily => ChartGranularity::Hourly,
+                    ChartGranularity::Hourly => ChartGranularity::Daily,
+                };
+            }
+            KeyCode::Char('v') if self.current_tab == Tab::Hourly => {
+                self.hourly_view_mode = match self.hourly_view_mode {
+                    HourlyViewMode::Table => HourlyViewMode::Profile,
+                    HourlyViewMode::Profile => HourlyViewMode::Table,
+                };
+                self.reset_selection();
+            }
             KeyCode::Char('g') => {
                 self.open_group_by_picker();
             }
-            KeyCode::Enter => {
-                if self.current_tab == Tab::Stats {
-                    self.handle_graph_selection();
-                }
+            KeyCode::Enter if self.current_tab == Tab::Stats => {
+                self.handle_graph_selection();
             }
-            KeyCode::Esc => {
-                if self.selected_graph_cell.is_some() {
-                    self.selected_graph_cell = None;
-                    self.stats_breakdown_total_lines = 0;
-                    self.selected_index = 0;
-                    self.scroll_offset = 0;
-                }
+            KeyCode::Esc if self.selected_graph_cell.is_some() => {
+                self.selected_graph_cell = None;
+                self.stats_breakdown_total_lines = 0;
+                self.selected_index = 0;
+                self.scroll_offset = 0;
             }
             _ => {}
         }
@@ -417,7 +499,7 @@ impl App {
                     {
                         match &area.action {
                             ClickAction::Tab(tab) => {
-                                self.current_tab = *tab;
+                                self.switch_tab(*tab);
                                 self.reset_selection();
                             }
                             ClickAction::Sort(field) => {
@@ -444,11 +526,19 @@ impl App {
         }
     }
 
+    /// Cache the latest terminal dimensions. `max_visible_items` is
+    /// intentionally not updated here: each tab's renderer owns its own
+    /// visible-item capacity and pushes the rendered count via
+    /// [`Self::set_max_visible_items`] (which clamps selection and scroll
+    /// state). Between resize and the next render, scroll math runs
+    /// against the previous tab's capacity for one frame and self-corrects.
     pub fn handle_resize(&mut self, width: u16, height: u16) {
         self.terminal_width = width;
         self.terminal_height = height;
-        // Ensure at least 1 visible item to prevent division/slice issues
-        self.max_visible_items = (height.saturating_sub(10) as usize).max(1);
+    }
+
+    pub(crate) fn set_max_visible_items(&mut self, max_visible_items: usize) {
+        self.max_visible_items = max_visible_items.max(1);
         self.clamp_selection();
     }
 
@@ -483,6 +573,25 @@ impl App {
         self.selected_index = 0;
         self.selected_graph_cell = None;
         self.stats_breakdown_total_lines = 0;
+    }
+
+    fn switch_tab(&mut self, target: Tab) {
+        self.tab_sort_state
+            .insert(self.current_tab, (self.sort_field, self.sort_direction));
+
+        self.current_tab = target;
+
+        let (field, dir) =
+            self.tab_sort_state
+                .get(&target)
+                .copied()
+                .unwrap_or(if target == Tab::Hourly {
+                    (SortField::Date, SortDirection::Descending)
+                } else {
+                    (SortField::Cost, SortDirection::Descending)
+                });
+        self.sort_field = field;
+        self.sort_direction = dir;
     }
 
     fn move_selection_up(&mut self) {
@@ -597,6 +706,7 @@ impl App {
             Tab::Overview | Tab::Models => self.data.models.len(),
             Tab::Agents => self.data.agents.len(),
             Tab::Daily => self.data.daily.len(),
+            Tab::Hourly => self.data.hourly.len(),
             Tab::Stats => {
                 if self.selected_graph_cell.is_some() {
                     self.stats_breakdown_total_lines
@@ -676,10 +786,36 @@ impl App {
     fn open_client_picker(&mut self) {
         let dialog = ClientPickerDialog::new(
             self.enabled_clients.clone(),
-            self.include_synthetic.clone(),
             self.dialog_needs_reload.clone(),
         );
         self.dialog_stack.show(Box::new(dialog));
+    }
+
+    /// Project the unified `HashSet<ClientFilter>` into the
+    /// `Vec<ClientId>` shape that `tokscale_core` scanners still consume.
+    /// `ClientFilter::Synthetic` does not have a `ClientId` and is
+    /// excluded from this projection — use [`Self::include_synthetic`]
+    /// for that signal.
+    pub fn scan_clients(&self) -> Vec<ClientId> {
+        let mut out: Vec<ClientId> = self
+            .enabled_clients
+            .borrow()
+            .iter()
+            .filter_map(|f| f.to_client_id())
+            .collect();
+        // Stable order for downstream cache key + log output. Sort by the
+        // declaration index in ClientId::ALL so the projection mirrors
+        // the canonical ordering used elsewhere.
+        out.sort_by_key(|c| *c as usize);
+        out
+    }
+
+    /// Whether the user has Synthetic enabled. Boundary helper for code
+    /// paths that still take a separate `bool include_synthetic` argument.
+    pub fn include_synthetic(&self) -> bool {
+        self.enabled_clients
+            .borrow()
+            .contains(&ClientFilter::Synthetic)
     }
 
     fn open_group_by_picker(&mut self) {
@@ -750,6 +886,14 @@ impl App {
                 .get_sorted_daily()
                 .get(self.selected_index)
                 .map(|d| format!("{}: {} tokens, ${:.4}", d.date, d.tokens.total(), d.cost)),
+            Tab::Hourly => self.get_sorted_hourly().get(self.selected_index).map(|h| {
+                format!(
+                    "{}: {} tokens, ${:.4}",
+                    h.datetime.format("%Y-%m-%d %H:%M"),
+                    h.tokens.total(),
+                    h.cost
+                )
+            }),
             Tab::Stats => None,
         };
 
@@ -762,57 +906,12 @@ impl App {
     }
 
     fn export_to_json(&mut self) {
-        let export_data = serde_json::json!({
-            "models": self.data.models.iter().map(|m| serde_json::json!({
-                "model": m.model,
-                "provider": m.provider,
-                "client": m.client,
-                "tokens": {
-                    "input": m.tokens.input,
-                    "output": m.tokens.output,
-                    "cacheRead": m.tokens.cache_read,
-                    "cacheWrite": m.tokens.cache_write,
-                    "total": m.tokens.total()
-                },
-                "cost": m.cost,
-                "sessionCount": m.session_count
-            })).collect::<Vec<_>>(),
-            "agents": self.data.agents.iter().map(|a| serde_json::json!({
-                "agent": a.agent,
-                "clients": a.clients,
-                "tokens": {
-                    "input": a.tokens.input,
-                    "output": a.tokens.output,
-                    "cacheRead": a.tokens.cache_read,
-                    "cacheWrite": a.tokens.cache_write,
-                    "total": a.tokens.total()
-                },
-                "cost": a.cost,
-                "messageCount": a.message_count
-            })).collect::<Vec<_>>(),
-            "daily": self.data.daily.iter().map(|d| serde_json::json!({
-                "date": d.date.to_string(),
-                "tokens": {
-                    "input": d.tokens.input,
-                    "output": d.tokens.output,
-                    "cacheRead": d.tokens.cache_read,
-                    "cacheWrite": d.tokens.cache_write,
-                    "total": d.tokens.total()
-                },
-                "cost": d.cost
-            })).collect::<Vec<_>>(),
-            "totals": {
-                "tokens": self.data.total_tokens,
-                "cost": self.data.total_cost
-            }
-        });
-
         let filename = format!(
             "tokscale-export-{}.json",
             chrono::Utc::now().format("%Y%m%d-%H%M%S")
         );
 
-        match serde_json::to_string_pretty(&export_data) {
+        match super::export::build_export_json(&self.data) {
             Ok(json) => match std::fs::write(&filename, json) {
                 Ok(_) => self.set_status(&format!("Exported to {}", filename)),
                 Err(e) => self.set_status(&format!("Export failed: {}", e)),
@@ -838,6 +937,8 @@ impl App {
         let tie_breaker = |a: &&ModelUsage, b: &&ModelUsage| {
             a.model
                 .cmp(&b.model)
+                .then_with(|| a.workspace_label.cmp(&b.workspace_label))
+                .then_with(|| a.workspace_key.cmp(&b.workspace_key))
                 .then_with(|| a.provider.cmp(&b.provider))
                 .then_with(|| a.client.cmp(&b.client))
         };
@@ -928,14 +1029,47 @@ impl App {
                     .then_with(|| a.date.cmp(&b.date))
             }),
             (SortField::Date, SortDirection::Descending) => {
-                daily.sort_by(|a, b| b.date.cmp(&a.date))
+                daily.sort_by_key(|b| std::cmp::Reverse(b.date))
             }
-            (SortField::Date, SortDirection::Ascending) => {
-                daily.sort_by(|a, b| a.date.cmp(&b.date))
-            }
+            (SortField::Date, SortDirection::Ascending) => daily.sort_by_key(|a| a.date),
         }
 
         daily
+    }
+
+    pub fn get_sorted_hourly(&self) -> Vec<&HourlyUsage> {
+        let mut hourly: Vec<&HourlyUsage> = self.data.hourly.iter().collect();
+
+        match (self.sort_field, self.sort_direction) {
+            (SortField::Cost, SortDirection::Descending) => hourly.sort_by(|a, b| {
+                b.cost
+                    .total_cmp(&a.cost)
+                    .then_with(|| a.datetime.cmp(&b.datetime))
+            }),
+            (SortField::Cost, SortDirection::Ascending) => hourly.sort_by(|a, b| {
+                a.cost
+                    .total_cmp(&b.cost)
+                    .then_with(|| a.datetime.cmp(&b.datetime))
+            }),
+            (SortField::Tokens, SortDirection::Descending) => hourly.sort_by(|a, b| {
+                b.tokens
+                    .total()
+                    .cmp(&a.tokens.total())
+                    .then_with(|| a.datetime.cmp(&b.datetime))
+            }),
+            (SortField::Tokens, SortDirection::Ascending) => hourly.sort_by(|a, b| {
+                a.tokens
+                    .total()
+                    .cmp(&b.tokens.total())
+                    .then_with(|| a.datetime.cmp(&b.datetime))
+            }),
+            (SortField::Date, SortDirection::Descending) => {
+                hourly.sort_by_key(|b| std::cmp::Reverse(b.datetime))
+            }
+            (SortField::Date, SortDirection::Ascending) => hourly.sort_by_key(|a| a.datetime),
+        }
+
+        hourly
     }
 
     pub fn is_narrow(&self) -> bool {
@@ -949,25 +1083,28 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use super::super::ui::widgets::get_provider_shade;
     use super::*;
     use crate::tui::data::{ModelUsage, TokenBreakdown};
 
     #[test]
     fn test_tab_all() {
         let tabs = Tab::all();
-        assert_eq!(tabs.len(), 5);
+        assert_eq!(tabs.len(), 6);
         assert_eq!(tabs[0], Tab::Overview);
         assert_eq!(tabs[1], Tab::Models);
         assert_eq!(tabs[2], Tab::Daily);
-        assert_eq!(tabs[3], Tab::Stats);
-        assert_eq!(tabs[4], Tab::Agents);
+        assert_eq!(tabs[3], Tab::Hourly);
+        assert_eq!(tabs[4], Tab::Stats);
+        assert_eq!(tabs[5], Tab::Agents);
     }
 
     #[test]
     fn test_tab_next() {
         assert_eq!(Tab::Overview.next(), Tab::Models);
         assert_eq!(Tab::Models.next(), Tab::Daily);
-        assert_eq!(Tab::Daily.next(), Tab::Stats);
+        assert_eq!(Tab::Daily.next(), Tab::Hourly);
+        assert_eq!(Tab::Hourly.next(), Tab::Stats);
         assert_eq!(Tab::Stats.next(), Tab::Agents);
         assert_eq!(Tab::Agents.next(), Tab::Overview);
     }
@@ -977,7 +1114,8 @@ mod tests {
         assert_eq!(Tab::Overview.prev(), Tab::Agents);
         assert_eq!(Tab::Models.prev(), Tab::Overview);
         assert_eq!(Tab::Daily.prev(), Tab::Models);
-        assert_eq!(Tab::Stats.prev(), Tab::Daily);
+        assert_eq!(Tab::Hourly.prev(), Tab::Daily);
+        assert_eq!(Tab::Stats.prev(), Tab::Hourly);
         assert_eq!(Tab::Agents.prev(), Tab::Stats);
     }
 
@@ -1047,6 +1185,8 @@ mod tests {
                 tokens: TokenBreakdown::default(),
                 cost: 0.0,
                 session_count: 1,
+                workspace_key: None,
+                workspace_label: None,
             },
             ModelUsage {
                 model: "model2".to_string(),
@@ -1055,6 +1195,8 @@ mod tests {
                 tokens: TokenBreakdown::default(),
                 cost: 0.0,
                 session_count: 1,
+                workspace_key: None,
+                workspace_label: None,
             },
         ];
 
@@ -1090,6 +1232,8 @@ mod tests {
                 tokens: TokenBreakdown::default(),
                 cost: 0.0,
                 session_count: 1,
+                workspace_key: None,
+                workspace_label: None,
             },
             ModelUsage {
                 model: "model2".to_string(),
@@ -1098,6 +1242,8 @@ mod tests {
                 tokens: TokenBreakdown::default(),
                 cost: 0.0,
                 session_count: 1,
+                workspace_key: None,
+                workspace_label: None,
             },
         ];
 
@@ -1132,6 +1278,8 @@ mod tests {
             tokens: TokenBreakdown::default(),
             cost: 0.0,
             session_count: 1,
+            workspace_key: None,
+            workspace_label: None,
         }];
 
         // Set selection beyond bounds
@@ -1195,7 +1343,7 @@ mod tests {
         };
         let app = App::new_with_cached_data(config, None).unwrap();
 
-        assert_eq!(app.should_quit, false);
+        assert!(!app.should_quit);
     }
 
     // ── Helper ──────────────────────────────────────────────────────
@@ -1214,6 +1362,27 @@ mod tests {
         App::new_with_cached_data(config, None).unwrap()
     }
 
+    #[test]
+    fn test_app_no_filter_default_matches_default_set() {
+        // Regression for an Oracle-flagged HIGH bug: the no-filter TUI
+        // default and the `submit` warm-cache filter set drifted apart,
+        // making every TUI launch after submit a stale-cache reuse
+        // instead of a fresh hit. Both paths now go through
+        // `ClientFilter::default_set()`; assert it stays that way.
+        let app = make_app();
+        let actual = app.enabled_clients.borrow().clone();
+        let expected = ClientFilter::default_set();
+        assert_eq!(
+            actual, expected,
+            "no-filter App default drifted from ClientFilter::default_set() — \
+             warm cache and TUI launch will mismatch"
+        );
+        assert!(
+            !actual.contains(&ClientFilter::Synthetic),
+            "no-filter default must not include Synthetic (opt-in only)"
+        );
+    }
+
     fn make_app_with_models(n: usize) -> App {
         let mut app = make_app();
         app.data.models = (0..n)
@@ -1224,6 +1393,8 @@ mod tests {
                 tokens: TokenBreakdown::default(),
                 cost: 0.0,
                 session_count: 1,
+                workspace_key: None,
+                workspace_label: None,
             })
             .collect();
         app
@@ -1269,6 +1440,9 @@ mod tests {
         assert_eq!(app.current_tab, Tab::Daily);
 
         app.handle_key_event(key(KeyCode::Tab));
+        assert_eq!(app.current_tab, Tab::Hourly);
+
+        app.handle_key_event(key(KeyCode::Tab));
         assert_eq!(app.current_tab, Tab::Stats);
 
         app.handle_key_event(key(KeyCode::Tab));
@@ -1288,6 +1462,9 @@ mod tests {
 
         app.handle_key_event(key(KeyCode::BackTab));
         assert_eq!(app.current_tab, Tab::Stats);
+
+        app.handle_key_event(key(KeyCode::BackTab));
+        assert_eq!(app.current_tab, Tab::Hourly);
 
         app.handle_key_event(key(KeyCode::BackTab));
         assert_eq!(app.current_tab, Tab::Daily);
@@ -1434,6 +1611,37 @@ mod tests {
         assert_eq!(app.sort_direction, SortDirection::Descending);
     }
 
+    #[test]
+    fn test_switch_tab_restores_hourly_date_default() {
+        let mut app = make_app();
+        assert_eq!(app.sort_field, SortField::Cost);
+
+        app.switch_tab(Tab::Hourly);
+        assert_eq!(app.sort_field, SortField::Date);
+        assert_eq!(app.sort_direction, SortDirection::Descending);
+
+        app.switch_tab(Tab::Models);
+        assert_eq!(app.sort_field, SortField::Cost);
+        assert_eq!(app.sort_direction, SortDirection::Descending);
+    }
+
+    #[test]
+    fn test_switch_tab_preserves_user_sort() {
+        let mut app = make_app();
+        app.switch_tab(Tab::Models);
+
+        app.set_sort(SortField::Tokens);
+        assert_eq!(app.sort_field, SortField::Tokens);
+        assert_eq!(app.sort_direction, SortDirection::Descending);
+
+        app.switch_tab(Tab::Daily);
+        assert_eq!(app.sort_field, SortField::Cost);
+
+        app.switch_tab(Tab::Models);
+        assert_eq!(app.sort_field, SortField::Tokens);
+        assert_eq!(app.sort_direction, SortDirection::Descending);
+    }
+
     // ── handle_key_event: navigation ────────────────────────────────
 
     #[test]
@@ -1529,6 +1737,22 @@ mod tests {
         app.move_selection_down();
         assert_eq!(app.selected_index, 0);
         assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn test_overview_scroll_keeps_rendered_capacity_after_resize() {
+        let mut app = make_app_with_models(33);
+        app.current_tab = Tab::Overview;
+        app.set_max_visible_items(9);
+
+        for _ in 0..32 {
+            app.move_selection_down();
+            app.handle_resize(120, 40);
+            app.set_max_visible_items(9);
+        }
+
+        assert_eq!(app.selected_index, 32);
+        assert_eq!(app.scroll_offset, 24);
     }
 
     // ── handle_key_event: theme ─────────────────────────────────────
@@ -1743,7 +1967,7 @@ mod tests {
         app.handle_resize(120, 40);
         assert_eq!(app.terminal_width, 120);
         assert_eq!(app.terminal_height, 40);
-        assert_eq!(app.max_visible_items, 30);
+        assert_eq!(app.max_visible_items, 20);
     }
 
     #[test]
@@ -1752,18 +1976,34 @@ mod tests {
         app.handle_resize(40, 12);
         assert_eq!(app.terminal_width, 40);
         assert_eq!(app.terminal_height, 12);
-        assert_eq!(app.max_visible_items, 2);
+        assert_eq!(app.max_visible_items, 20);
     }
 
     #[test]
-    fn test_handle_resize_clamps_selection() {
+    fn test_handle_resize_preserves_rendered_capacity() {
         let mut app = make_app_with_models(5);
         app.selected_index = 4;
-        app.scroll_offset = 3;
-        app.max_visible_items = 20;
+        app.scroll_offset = 2;
+        app.max_visible_items = 3;
 
         app.handle_resize(80, 24);
-        assert!(app.selected_index <= 4);
+
+        assert_eq!(app.max_visible_items, 3);
+        assert_eq!(app.selected_index, 4);
+        assert_eq!(app.scroll_offset, 2);
+    }
+
+    #[test]
+    fn test_set_max_visible_items_clamps_scroll_offset() {
+        let mut app = make_app_with_models(10);
+        app.selected_index = 9;
+        app.scroll_offset = 9;
+
+        app.set_max_visible_items(3);
+
+        assert_eq!(app.max_visible_items, 3);
+        assert_eq!(app.selected_index, 9);
+        assert_eq!(app.scroll_offset, 7);
     }
 
     // ── on_tick ─────────────────────────────────────────────────────
@@ -1846,5 +2086,297 @@ mod tests {
 
         app.terminal_width = 60;
         assert!(!app.is_very_narrow());
+    }
+
+    // ── HourlyViewMode tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_hourly_view_mode_default() {
+        let mode = HourlyViewMode::default();
+        assert_eq!(mode, HourlyViewMode::Table);
+    }
+
+    #[test]
+    fn test_hourly_view_mode_toggle() {
+        let mut app = make_app();
+        assert_eq!(app.hourly_view_mode, HourlyViewMode::Table);
+
+        // Toggle to Profile when on Hourly tab
+        app.current_tab = Tab::Hourly;
+        app.handle_key_event(key(KeyCode::Char('v')));
+        assert_eq!(app.hourly_view_mode, HourlyViewMode::Profile);
+
+        // Toggle back to Table
+        app.handle_key_event(key(KeyCode::Char('v')));
+        assert_eq!(app.hourly_view_mode, HourlyViewMode::Table);
+    }
+
+    #[test]
+    fn test_hourly_view_mode_no_toggle_on_other_tabs() {
+        let mut app = make_app();
+        assert_eq!(app.hourly_view_mode, HourlyViewMode::Table);
+
+        // 'v' should not toggle when not on Hourly tab
+        app.current_tab = Tab::Overview;
+        app.handle_key_event(key(KeyCode::Char('v')));
+        assert_eq!(app.hourly_view_mode, HourlyViewMode::Table);
+
+        app.current_tab = Tab::Daily;
+        app.handle_key_event(key(KeyCode::Char('v')));
+        assert_eq!(app.hourly_view_mode, HourlyViewMode::Table);
+    }
+
+    // ── build_model_shade_map ───────────────────────────────────────
+
+    fn model_usage(name: &str, cost: f64, workspace: Option<&str>) -> ModelUsage {
+        ModelUsage {
+            model: name.to_string(),
+            provider: "anthropic".to_string(),
+            client: "claude".to_string(),
+            workspace_key: workspace.map(String::from),
+            workspace_label: workspace.map(String::from),
+            tokens: TokenBreakdown::default(),
+            cost,
+            session_count: 1,
+        }
+    }
+
+    fn shade_key(provider: &str, model: &str) -> String {
+        super::super::colors::model_shade_key(provider, model)
+    }
+
+    #[test]
+    fn test_shade_map_assigns_rank_0_to_highest_cost() {
+        let mut app = make_app();
+        app.data.models = vec![
+            model_usage("claude-haiku-4-5", 10.0, None),
+            model_usage("claude-opus-4-5", 100.0, None),
+            model_usage("claude-sonnet-4-5", 50.0, None),
+        ];
+        app.build_model_shade_map();
+
+        let opus = app
+            .model_shade_map
+            .get(&shade_key("anthropic", "claude-opus-4-5"))
+            .copied()
+            .unwrap();
+        let sonnet = app
+            .model_shade_map
+            .get(&shade_key("anthropic", "claude-sonnet-4-5"))
+            .copied()
+            .unwrap();
+        let haiku = app
+            .model_shade_map
+            .get(&shade_key("anthropic", "claude-haiku-4-5"))
+            .copied()
+            .unwrap();
+
+        // Rank 0 is the base Anthropic coral; ranks below lighten toward white.
+        assert_eq!(opus, get_provider_shade("anthropic", 0));
+        assert_eq!(sonnet, get_provider_shade("anthropic", 1));
+        assert_eq!(haiku, get_provider_shade("anthropic", 2));
+    }
+
+    #[test]
+    fn test_shade_map_dedupes_same_model_across_workspaces() {
+        // Same model appearing N times in different workspaces (as happens
+        // under GroupBy::WorkspaceModel) must not inflate the rank count.
+        let mut app = make_app();
+        app.data.models = vec![
+            model_usage("claude-sonnet-4-5", 20.0, Some("ws-a")),
+            model_usage("claude-sonnet-4-5", 20.0, Some("ws-b")),
+            model_usage("claude-sonnet-4-5", 20.0, Some("ws-c")),
+            model_usage("claude-haiku-4-5", 5.0, None),
+        ];
+        app.build_model_shade_map();
+
+        // Only two distinct model names should be in the map; sonnet takes
+        // rank 0 (aggregate cost 60 > haiku cost 5).
+        assert_eq!(app.model_shade_map.len(), 2);
+        assert_eq!(
+            app.model_shade_map
+                .get(&shade_key("anthropic", "claude-sonnet-4-5"))
+                .copied(),
+            Some(get_provider_shade("anthropic", 0))
+        );
+        assert_eq!(
+            app.model_shade_map
+                .get(&shade_key("anthropic", "claude-haiku-4-5"))
+                .copied(),
+            Some(get_provider_shade("anthropic", 1))
+        );
+    }
+
+    #[test]
+    fn test_shade_map_is_deterministic_on_cost_ties() {
+        // All-zero costs (fresh data) must produce a stable shade assignment
+        // across refreshes so the chart doesn't flicker.
+        let ranks = |app: &App| {
+            let a = app
+                .model_shade_map
+                .get(&shade_key("anthropic", "claude-alpha"))
+                .copied();
+            let b = app
+                .model_shade_map
+                .get(&shade_key("anthropic", "claude-beta"))
+                .copied();
+            let c = app
+                .model_shade_map
+                .get(&shade_key("anthropic", "claude-gamma"))
+                .copied();
+            (a, b, c)
+        };
+
+        let mut app1 = make_app();
+        app1.data.models = vec![
+            model_usage("claude-gamma", 0.0, None),
+            model_usage("claude-alpha", 0.0, None),
+            model_usage("claude-beta", 0.0, None),
+        ];
+        app1.build_model_shade_map();
+
+        let mut app2 = make_app();
+        app2.data.models = vec![
+            model_usage("claude-beta", 0.0, None),
+            model_usage("claude-gamma", 0.0, None),
+            model_usage("claude-alpha", 0.0, None),
+        ];
+        app2.build_model_shade_map();
+
+        assert_eq!(ranks(&app1), ranks(&app2));
+        // alpha sorts first by name so it gets rank 0 on ties.
+        assert_eq!(
+            app1.model_shade_map
+                .get(&shade_key("anthropic", "claude-alpha"))
+                .copied(),
+            Some(get_provider_shade("anthropic", 0))
+        );
+    }
+
+    #[test]
+    fn test_shade_map_handles_nan_cost() {
+        // NaN costs must not propagate into total_cmp ordering surprises or
+        // crash the builder.
+        let mut app = make_app();
+        app.data.models = vec![
+            model_usage("claude-nan", f64::NAN, None),
+            model_usage("claude-normal", 1.0, None),
+        ];
+        app.build_model_shade_map();
+
+        assert_eq!(app.model_shade_map.len(), 2);
+        // Normal model outranks NaN (which is coerced to 0).
+        assert_eq!(
+            app.model_shade_map
+                .get(&shade_key("anthropic", "claude-normal"))
+                .copied(),
+            Some(get_provider_shade("anthropic", 0))
+        );
+    }
+
+    #[test]
+    fn test_shade_map_separates_providers() {
+        let mut app = make_app();
+        app.data.models = vec![
+            ModelUsage {
+                model: "claude-opus-4-5".to_string(),
+                provider: "anthropic".to_string(),
+                client: "claude".to_string(),
+                workspace_key: None,
+                workspace_label: None,
+                tokens: TokenBreakdown::default(),
+                cost: 10.0,
+                session_count: 1,
+            },
+            ModelUsage {
+                model: "gpt-5".to_string(),
+                provider: "openai".to_string(),
+                client: "codex".to_string(),
+                workspace_key: None,
+                workspace_label: None,
+                tokens: TokenBreakdown::default(),
+                cost: 1.0,
+                session_count: 1,
+            },
+        ];
+        app.build_model_shade_map();
+
+        // Each provider ranks independently — both get rank-0 shades.
+        assert_eq!(
+            app.model_shade_map
+                .get(&shade_key("anthropic", "claude-opus-4-5"))
+                .copied(),
+            Some(get_provider_shade("anthropic", 0))
+        );
+        assert_eq!(
+            app.model_shade_map
+                .get(&shade_key("openai", "gpt-5"))
+                .copied(),
+            Some(get_provider_shade("openai", 0))
+        );
+    }
+
+    #[test]
+    fn test_shade_map_rebuilds_on_update_data() {
+        let mut app = make_app();
+        app.data.models = vec![model_usage("claude-opus-4-5", 10.0, None)];
+        app.build_model_shade_map();
+        assert!(app
+            .model_shade_map
+            .contains_key(&shade_key("anthropic", "claude-opus-4-5")));
+
+        let fresh = UsageData {
+            models: vec![model_usage("claude-sonnet-4-5", 5.0, None)],
+            ..UsageData::default()
+        };
+        app.update_data(fresh);
+
+        assert!(!app
+            .model_shade_map
+            .contains_key(&shade_key("anthropic", "claude-opus-4-5")));
+        assert!(app
+            .model_shade_map
+            .contains_key(&shade_key("anthropic", "claude-sonnet-4-5")));
+    }
+
+    #[test]
+    fn test_same_model_name_keeps_distinct_provider_colors() {
+        let mut app = make_app();
+        app.data.models = vec![
+            ModelUsage {
+                model: "sonnet-shared".to_string(),
+                provider: "anthropic".to_string(),
+                client: "claude".to_string(),
+                workspace_key: None,
+                workspace_label: None,
+                tokens: TokenBreakdown::default(),
+                cost: 10.0,
+                session_count: 1,
+            },
+            ModelUsage {
+                model: "sonnet-shared".to_string(),
+                provider: "openai".to_string(),
+                client: "codex".to_string(),
+                workspace_key: None,
+                workspace_label: None,
+                tokens: TokenBreakdown::default(),
+                cost: 5.0,
+                session_count: 1,
+            },
+        ];
+        app.build_model_shade_map();
+
+        assert_eq!(
+            app.model_color_for("anthropic", "sonnet-shared"),
+            get_provider_shade("anthropic", 0)
+        );
+        assert_eq!(
+            app.model_color_for("openai", "sonnet-shared"),
+            get_provider_shade("openai", 0)
+        );
+        assert_ne!(
+            app.model_color_for("anthropic", "sonnet-shared"),
+            app.model_color_for("openai", "sonnet-shared")
+        );
     }
 }

@@ -50,6 +50,13 @@
       "when": 1777008000000,
       "tag": "0006_enable_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777404000000,
+      "tag": "0007_add_case_insensitive_username_index",
+      "breakpoints": true
     }
   ]
 }

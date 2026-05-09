@@ -7,6 +7,7 @@ export function useOS(): OS {
 
   useEffect(() => {
     const ua = navigator.userAgent;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (/Win/.test(ua)) setOs("windows");
     else if (/Mac/.test(ua)) setOs("mac");
     else setOs("linux");

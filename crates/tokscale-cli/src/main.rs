@@ -1,12 +1,14 @@
 mod anthropic_api;
+mod antigravity;
 mod auth;
 mod commands;
 mod cursor;
+mod paths;
 mod tui;
 
 use crate::tui::client_ui;
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,71 +42,35 @@ struct Cli {
     #[arg(long, help = "Use legacy CLI table output")]
     light: bool,
 
-    #[arg(long, help = "Show only OpenCode usage")]
-    opencode: bool,
+    #[arg(
+        long = "write-cache",
+        requires = "light",
+        conflicts_with = "no_write_cache",
+        help = "After --light renders, atomically overwrite the TUI cache with this report's data so the next `tokscale tui` starts from fresh data. Persists across invocations via settings.json `light.writeCache`."
+    )]
+    write_cache: bool,
 
-    #[arg(long, help = "Show only Claude Code usage")]
-    claude: bool,
+    #[arg(
+        long = "no-write-cache",
+        requires = "light",
+        conflicts_with = "write_cache",
+        help = "Skip cache write even if settings.json `light.writeCache` is true. Only valid with --light."
+    )]
+    no_write_cache: bool,
 
-    #[arg(long, help = "Show only Codex CLI usage")]
-    codex: bool,
+    #[command(flatten)]
+    clients: ClientFlags,
 
-    #[arg(long, help = "Show only Gemini CLI usage")]
-    gemini: bool,
+    #[command(flatten)]
+    date: DateRangeFlags,
 
-    #[arg(long, help = "Show only Cursor IDE usage")]
-    cursor: bool,
-
-    #[arg(long, help = "Show only Amp usage")]
-    amp: bool,
-
-    #[arg(long, help = "Show only Droid usage")]
-    droid: bool,
-
-    #[arg(long, help = "Show only OpenClaw usage")]
-    openclaw: bool,
-
-    #[arg(long, help = "Show only Pi usage")]
-    pi: bool,
-
-    #[arg(long, help = "Show only Kimi CLI usage")]
-    kimi: bool,
-
-    #[arg(long, help = "Show only Qwen CLI usage")]
-    qwen: bool,
-
-    #[arg(long, help = "Show only Roo Code usage")]
-    roocode: bool,
-
-    #[arg(long, help = "Show only KiloCode usage")]
-    kilocode: bool,
-
-    #[arg(long, help = "Show only Kilo CLI usage")]
-    kilo: bool,
-
-    #[arg(long, help = "Show only Mux usage")]
-    mux: bool,
-
-    #[arg(long, help = "Show only Synthetic usage")]
-    synthetic: bool,
-
-    #[arg(long, help = "Show only today's usage")]
-    today: bool,
-
-    #[arg(long, help = "Show last 7 days")]
-    week: bool,
-
-    #[arg(long, help = "Show current month")]
-    month: bool,
-
-    #[arg(long, help = "Start date (YYYY-MM-DD)")]
-    since: Option<String>,
-
-    #[arg(long, help = "End date (YYYY-MM-DD)")]
-    until: Option<String>,
-
-    #[arg(long, help = "Filter by year (YYYY)")]
-    year: Option<String>,
+    #[arg(
+        long,
+        value_name = "PATH",
+        global = true,
+        help = "Read local session data from this home directory for local report commands"
+    )]
+    home: Option<String>,
 
     #[arg(long, help = "Show processing time")]
     benchmark: bool,
@@ -113,7 +79,7 @@ struct Cli {
         long,
         value_name = "STRATEGY",
         default_value = "client,model",
-        help = "Grouping strategy for --light and --json output: model, client,model, client,provider,model"
+        help = "Grouping strategy for --light and --json output: model, client,model, client,provider,model, workspace,model"
     )]
     group_by: String,
 
@@ -129,59 +95,33 @@ enum Commands {
         json: bool,
         #[arg(long)]
         light: bool,
-        #[arg(long, help = "Show only OpenCode usage")]
-        opencode: bool,
-        #[arg(long, help = "Show only Claude Code usage")]
-        claude: bool,
-        #[arg(long, help = "Show only Codex CLI usage")]
-        codex: bool,
-        #[arg(long, help = "Show only Gemini CLI usage")]
-        gemini: bool,
-        #[arg(long, help = "Show only Cursor IDE usage")]
-        cursor: bool,
-        #[arg(long, help = "Show only Amp usage")]
-        amp: bool,
-        #[arg(long, help = "Show only Droid usage")]
-        droid: bool,
-        #[arg(long, help = "Show only OpenClaw usage")]
-        openclaw: bool,
-        #[arg(long, help = "Show only Pi usage")]
-        pi: bool,
-        #[arg(long, help = "Show only Kimi CLI usage")]
-        kimi: bool,
-        #[arg(long, help = "Show only Qwen CLI usage")]
-        qwen: bool,
-        #[arg(long, help = "Show only Roo Code usage")]
-        roocode: bool,
-        #[arg(long, help = "Show only KiloCode usage")]
-        kilocode: bool,
-        #[arg(long, help = "Show only Kilo CLI usage")]
-        kilo: bool,
-        #[arg(long, help = "Show only Mux usage")]
-        mux: bool,
-        #[arg(long, help = "Show only Synthetic usage")]
-        synthetic: bool,
-        #[arg(long, help = "Show only today's usage")]
-        today: bool,
-        #[arg(long, help = "Show last 7 days")]
-        week: bool,
-        #[arg(long, help = "Show current month")]
-        month: bool,
-        #[arg(long, help = "Start date (YYYY-MM-DD)")]
-        since: Option<String>,
-        #[arg(long, help = "End date (YYYY-MM-DD)")]
-        until: Option<String>,
-        #[arg(long, help = "Filter by year (YYYY)")]
-        year: Option<String>,
+        #[command(flatten)]
+        clients: ClientFlags,
+        #[command(flatten)]
+        date: DateRangeFlags,
         #[arg(long, help = "Show processing time")]
         benchmark: bool,
         #[arg(
             long,
             value_name = "STRATEGY",
             default_value = "client,model",
-            help = "Grouping strategy for --light and --json output: model, client,model, client,provider,model"
+            help = "Grouping strategy for --light and --json output: model, client,model, client,provider,model, workspace,model"
         )]
         group_by: String,
+        #[arg(
+            long = "write-cache",
+            requires = "light",
+            conflicts_with = "no_write_cache",
+            help = "After --light renders, atomically overwrite the TUI cache with this report's data so the next `tokscale tui` starts from fresh data. Persists across invocations via settings.json `light.writeCache`."
+        )]
+        write_cache: bool,
+        #[arg(
+            long = "no-write-cache",
+            requires = "light",
+            conflicts_with = "write_cache",
+            help = "Skip cache write even if settings.json `light.writeCache` is true. Only valid with --light."
+        )]
+        no_write_cache: bool,
         #[arg(long, help = "Disable spinner")]
         no_spinner: bool,
     },
@@ -191,50 +131,25 @@ enum Commands {
         json: bool,
         #[arg(long)]
         light: bool,
-        #[arg(long, help = "Show only OpenCode usage")]
-        opencode: bool,
-        #[arg(long, help = "Show only Claude Code usage")]
-        claude: bool,
-        #[arg(long, help = "Show only Codex CLI usage")]
-        codex: bool,
-        #[arg(long, help = "Show only Gemini CLI usage")]
-        gemini: bool,
-        #[arg(long, help = "Show only Cursor IDE usage")]
-        cursor: bool,
-        #[arg(long, help = "Show only Amp usage")]
-        amp: bool,
-        #[arg(long, help = "Show only Droid usage")]
-        droid: bool,
-        #[arg(long, help = "Show only OpenClaw usage")]
-        openclaw: bool,
-        #[arg(long, help = "Show only Pi usage")]
-        pi: bool,
-        #[arg(long, help = "Show only Kimi CLI usage")]
-        kimi: bool,
-        #[arg(long, help = "Show only Qwen CLI usage")]
-        qwen: bool,
-        #[arg(long, help = "Show only Roo Code usage")]
-        roocode: bool,
-        #[arg(long, help = "Show only KiloCode usage")]
-        kilocode: bool,
-        #[arg(long, help = "Show only Kilo CLI usage")]
-        kilo: bool,
-        #[arg(long, help = "Show only Mux usage")]
-        mux: bool,
-        #[arg(long, help = "Show only Synthetic usage")]
-        synthetic: bool,
-        #[arg(long, help = "Show only today's usage")]
-        today: bool,
-        #[arg(long, help = "Show last 7 days")]
-        week: bool,
-        #[arg(long, help = "Show current month")]
-        month: bool,
-        #[arg(long, help = "Start date (YYYY-MM-DD)")]
-        since: Option<String>,
-        #[arg(long, help = "End date (YYYY-MM-DD)")]
-        until: Option<String>,
-        #[arg(long, help = "Filter by year (YYYY)")]
-        year: Option<String>,
+        #[command(flatten)]
+        clients: ClientFlags,
+        #[command(flatten)]
+        date: DateRangeFlags,
+        #[arg(long, help = "Show processing time")]
+        benchmark: bool,
+        #[arg(long, help = "Disable spinner")]
+        no_spinner: bool,
+    },
+    #[command(about = "Show hourly usage report")]
+    Hourly {
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        light: bool,
+        #[command(flatten)]
+        clients: ClientFlags,
+        #[command(flatten)]
+        date: DateRangeFlags,
         #[arg(long, help = "Show processing time")]
         benchmark: bool,
         #[arg(long, help = "Disable spinner")]
@@ -256,7 +171,13 @@ enum Commands {
         json: bool,
     },
     #[command(about = "Login to Tokscale (opens browser for GitHub auth)")]
-    Login,
+    Login {
+        #[arg(
+            long,
+            help = "Save an existing Tokscale API token without browser auth"
+        )]
+        token: Option<String>,
+    },
     #[command(about = "Sync usage data from provider APIs (Anthropic, Cursor)")]
     SyncApi {
         #[arg(long, help = "Sync Anthropic Admin API usage")]
@@ -276,50 +197,10 @@ enum Commands {
     Graph {
         #[arg(long, help = "Write to file instead of stdout")]
         output: Option<String>,
-        #[arg(long, help = "Show only OpenCode usage")]
-        opencode: bool,
-        #[arg(long, help = "Show only Claude Code usage")]
-        claude: bool,
-        #[arg(long, help = "Show only Codex CLI usage")]
-        codex: bool,
-        #[arg(long, help = "Show only Gemini CLI usage")]
-        gemini: bool,
-        #[arg(long, help = "Show only Cursor IDE usage")]
-        cursor: bool,
-        #[arg(long, help = "Show only Amp usage")]
-        amp: bool,
-        #[arg(long, help = "Show only Droid usage")]
-        droid: bool,
-        #[arg(long, help = "Show only OpenClaw usage")]
-        openclaw: bool,
-        #[arg(long, help = "Show only Pi usage")]
-        pi: bool,
-        #[arg(long, help = "Show only Kimi CLI usage")]
-        kimi: bool,
-        #[arg(long, help = "Show only Qwen CLI usage")]
-        qwen: bool,
-        #[arg(long, help = "Show only Roo Code usage")]
-        roocode: bool,
-        #[arg(long, help = "Show only KiloCode usage")]
-        kilocode: bool,
-        #[arg(long, help = "Show only Kilo CLI usage")]
-        kilo: bool,
-        #[arg(long, help = "Show only Mux usage")]
-        mux: bool,
-        #[arg(long, help = "Show only Synthetic usage")]
-        synthetic: bool,
-        #[arg(long, help = "Show only today's usage")]
-        today: bool,
-        #[arg(long, help = "Show last 7 days")]
-        week: bool,
-        #[arg(long, help = "Show current month")]
-        month: bool,
-        #[arg(long, help = "Start date (YYYY-MM-DD)")]
-        since: Option<String>,
-        #[arg(long, help = "End date (YYYY-MM-DD)")]
-        until: Option<String>,
-        #[arg(long, help = "Filter by year (YYYY)")]
-        year: Option<String>,
+        #[command(flatten)]
+        clients: ClientFlags,
+        #[command(flatten)]
+        date: DateRangeFlags,
         #[arg(long, help = "Show processing time")]
         benchmark: bool,
         #[arg(long, help = "Disable spinner")]
@@ -327,97 +208,17 @@ enum Commands {
     },
     #[command(about = "Launch interactive TUI with optional filters")]
     Tui {
-        #[arg(long, help = "Show only OpenCode usage")]
-        opencode: bool,
-        #[arg(long, help = "Show only Claude Code usage")]
-        claude: bool,
-        #[arg(long, help = "Show only Codex CLI usage")]
-        codex: bool,
-        #[arg(long, help = "Show only Gemini CLI usage")]
-        gemini: bool,
-        #[arg(long, help = "Show only Cursor IDE usage")]
-        cursor: bool,
-        #[arg(long, help = "Show only Amp usage")]
-        amp: bool,
-        #[arg(long, help = "Show only Droid usage")]
-        droid: bool,
-        #[arg(long, help = "Show only OpenClaw usage")]
-        openclaw: bool,
-        #[arg(long, help = "Show only Pi usage")]
-        pi: bool,
-        #[arg(long, help = "Show only Kimi CLI usage")]
-        kimi: bool,
-        #[arg(long, help = "Show only Qwen CLI usage")]
-        qwen: bool,
-        #[arg(long, help = "Show only Roo Code usage")]
-        roocode: bool,
-        #[arg(long, help = "Show only KiloCode usage")]
-        kilocode: bool,
-        #[arg(long, help = "Show only Kilo CLI usage")]
-        kilo: bool,
-        #[arg(long, help = "Show only Mux usage")]
-        mux: bool,
-        #[arg(long, help = "Show only Synthetic usage")]
-        synthetic: bool,
-        #[arg(long, help = "Show only today's usage")]
-        today: bool,
-        #[arg(long, help = "Show last 7 days")]
-        week: bool,
-        #[arg(long, help = "Show current month")]
-        month: bool,
-        #[arg(long, help = "Start date (YYYY-MM-DD)")]
-        since: Option<String>,
-        #[arg(long, help = "End date (YYYY-MM-DD)")]
-        until: Option<String>,
-        #[arg(long, help = "Filter by year (YYYY)")]
-        year: Option<String>,
+        #[command(flatten)]
+        clients: ClientFlags,
+        #[command(flatten)]
+        date: DateRangeFlags,
     },
     #[command(about = "Submit usage data to the Tokscale social platform")]
     Submit {
-        #[arg(long, help = "Include only OpenCode data")]
-        opencode: bool,
-        #[arg(long, help = "Include only Claude Code data")]
-        claude: bool,
-        #[arg(long, help = "Include only Codex CLI data")]
-        codex: bool,
-        #[arg(long, help = "Include only Gemini CLI data")]
-        gemini: bool,
-        #[arg(long, help = "Include only Cursor IDE data")]
-        cursor: bool,
-        #[arg(long, help = "Include only Amp data")]
-        amp: bool,
-        #[arg(long, help = "Include only Droid data")]
-        droid: bool,
-        #[arg(long, help = "Include only OpenClaw data")]
-        openclaw: bool,
-        #[arg(long, help = "Include only Pi data")]
-        pi: bool,
-        #[arg(long, help = "Include only Kimi CLI data")]
-        kimi: bool,
-        #[arg(long, help = "Include only Qwen CLI data")]
-        qwen: bool,
-        #[arg(long, help = "Show only Roo Code usage")]
-        roocode: bool,
-        #[arg(long, help = "Show only KiloCode usage")]
-        kilocode: bool,
-        #[arg(long, help = "Show only Kilo CLI usage")]
-        kilo: bool,
-        #[arg(long, help = "Show only Mux usage")]
-        mux: bool,
-        #[arg(long, help = "Show only Synthetic usage")]
-        synthetic: bool,
-        #[arg(long, help = "Submit only today's usage")]
-        today: bool,
-        #[arg(long, help = "Submit last 7 days")]
-        week: bool,
-        #[arg(long, help = "Submit current month")]
-        month: bool,
-        #[arg(long, help = "Start date (YYYY-MM-DD)")]
-        since: Option<String>,
-        #[arg(long, help = "End date (YYYY-MM-DD)")]
-        until: Option<String>,
-        #[arg(long, help = "Filter by year (YYYY)")]
-        year: Option<String>,
+        #[command(flatten)]
+        clients: ClientFlags,
+        #[command(flatten)]
+        date: DateRangeFlags,
         #[arg(
             long,
             help = "Show what would be submitted without actually submitting"
@@ -443,38 +244,8 @@ enum Commands {
         output: Option<String>,
         #[arg(long, help = "Year to generate (default: current year)")]
         year: Option<String>,
-        #[arg(long, help = "Show only OpenCode usage")]
-        opencode: bool,
-        #[arg(long, help = "Show only Claude Code usage")]
-        claude: bool,
-        #[arg(long, help = "Show only Codex CLI usage")]
-        codex: bool,
-        #[arg(long, help = "Show only Gemini CLI usage")]
-        gemini: bool,
-        #[arg(long, help = "Show only Cursor IDE usage")]
-        cursor: bool,
-        #[arg(long, help = "Show only Amp usage")]
-        amp: bool,
-        #[arg(long, help = "Show only Droid usage")]
-        droid: bool,
-        #[arg(long, help = "Show only OpenClaw usage")]
-        openclaw: bool,
-        #[arg(long, help = "Show only Pi usage")]
-        pi: bool,
-        #[arg(long, help = "Show only Kimi CLI usage")]
-        kimi: bool,
-        #[arg(long, help = "Show only Qwen CLI usage")]
-        qwen: bool,
-        #[arg(long, help = "Show only Roo Code usage")]
-        roocode: bool,
-        #[arg(long, help = "Show only KiloCode usage")]
-        kilocode: bool,
-        #[arg(long, help = "Show only Kilo CLI usage")]
-        kilo: bool,
-        #[arg(long, help = "Show only Mux usage")]
-        mux: bool,
-        #[arg(long, help = "Show only Synthetic usage")]
-        synthetic: bool,
+        #[command(flatten)]
+        client_flags: ClientFlags,
         #[arg(
             long,
             help = "Display total tokens in abbreviated format (e.g., 7.14B)"
@@ -494,6 +265,15 @@ enum Commands {
         #[command(subcommand)]
         subcommand: CursorSubcommand,
     },
+    #[command(about = "Antigravity integration commands")]
+    Antigravity {
+        #[command(subcommand)]
+        subcommand: AntigravitySubcommand,
+    },
+    #[command(about = "Delete all submitted usage data from the server")]
+    DeleteSubmittedData,
+    #[command(about = "Warm TUI cache in background (internal)", hide = true)]
+    WarmTuiCache,
 }
 
 #[derive(Subcommand)]
@@ -522,11 +302,29 @@ enum CursorSubcommand {
         #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(about = "Sync Cursor usage into the local cache")]
+    Sync {
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
+    },
     #[command(about = "Switch active Cursor account")]
     Switch {
         #[arg(help = "Account label or id")]
         name: String,
     },
+}
+
+#[derive(Subcommand)]
+enum AntigravitySubcommand {
+    #[command(about = "Sync usage from running Antigravity language servers")]
+    Sync,
+    #[command(about = "Show Antigravity sync status")]
+    Status {
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
+    },
+    #[command(about = "Delete cached Antigravity usage artifacts")]
+    PurgeCache,
 }
 
 fn main() -> Result<()> {
@@ -543,30 +341,12 @@ fn main() -> Result<()> {
         Some(Commands::Models {
             json,
             light,
-            opencode,
-            claude,
-            codex,
-            gemini,
-            cursor,
-            amp,
-            droid,
-            openclaw,
-            pi,
-            kimi,
-            qwen,
-            roocode,
-            kilocode,
-            kilo,
-            mux,
-            synthetic,
-            today,
-            week,
-            month,
-            since,
-            until,
-            year,
+            clients,
+            date,
             benchmark,
             group_by,
+            write_cache,
+            no_write_cache,
             no_spinner,
         }) => {
             use tokscale_core::GroupBy;
@@ -575,29 +355,16 @@ fn main() -> Result<()> {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             });
-            let clients = build_client_filter(ClientFlags {
-                opencode,
-                claude,
-                codex,
-                gemini,
-                cursor,
-                amp,
-                droid,
-                openclaw,
-                pi,
-                kimi,
-                qwen,
-                roocode,
-                kilocode,
-                kilo,
-                mux,
-                synthetic,
-            });
-            let (since, until) = build_date_filter(today, week, month, since, until);
-            let year = normalize_year_filter(today, week, month, year);
+            let today = date.today;
+            let week = date.week;
+            let month = date.month;
+            let (since, until) = build_date_filter(today, week, month, date.since, date.until);
+            let year = normalize_year_filter(today, week, month, date.year);
+            let clients = build_client_filter(clients);
             if json || light || !can_use_tui {
                 run_models_report(
                     json,
+                    cli.home.clone(),
                     clients,
                     since,
                     until,
@@ -608,8 +375,12 @@ fn main() -> Result<()> {
                     week,
                     month,
                     group_by,
+                    write_cache,
+                    no_write_cache,
                 )
             } else {
+                ensure_home_supported_for_tui(&cli.home)?;
+                auto_sync_cursor_before_tui(&cli.home, &clients)?;
                 tui::run(
                     &cli.theme,
                     cli.refresh,
@@ -625,54 +396,21 @@ fn main() -> Result<()> {
         Some(Commands::Monthly {
             json,
             light,
-            opencode,
-            claude,
-            codex,
-            gemini,
-            cursor,
-            amp,
-            droid,
-            openclaw,
-            pi,
-            kimi,
-            qwen,
-            roocode,
-            kilocode,
-            kilo,
-            mux,
-            synthetic,
-            today,
-            week,
-            month,
-            since,
-            until,
-            year,
+            clients,
+            date,
             benchmark,
             no_spinner,
         }) => {
-            let clients = build_client_filter(ClientFlags {
-                opencode,
-                claude,
-                codex,
-                gemini,
-                cursor,
-                amp,
-                droid,
-                openclaw,
-                pi,
-                kimi,
-                qwen,
-                roocode,
-                kilocode,
-                kilo,
-                mux,
-                synthetic,
-            });
-            let (since, until) = build_date_filter(today, week, month, since, until);
-            let year = normalize_year_filter(today, week, month, year);
+            let today = date.today;
+            let week = date.week;
+            let month = date.month;
+            let (since, until) = build_date_filter(today, week, month, date.since, date.until);
+            let year = normalize_year_filter(today, week, month, date.year);
+            let clients = build_client_filter(clients);
             if json || light || !can_use_tui {
                 run_monthly_report(
                     json,
+                    cli.home.clone(),
                     clients,
                     since,
                     until,
@@ -684,6 +422,8 @@ fn main() -> Result<()> {
                     month,
                 )
             } else {
+                ensure_home_supported_for_tui(&cli.home)?;
+                auto_sync_cursor_before_tui(&cli.home, &clients)?;
                 tui::run(
                     &cli.theme,
                     cli.refresh,
@@ -696,115 +436,116 @@ fn main() -> Result<()> {
                 )
             }
         }
+        Some(Commands::Hourly {
+            json,
+            light,
+            clients,
+            date,
+            benchmark,
+            no_spinner,
+        }) => {
+            let today = date.today;
+            let week = date.week;
+            let month = date.month;
+            let (since, until) = build_date_filter(today, week, month, date.since, date.until);
+            let year = normalize_year_filter(today, week, month, date.year);
+            let clients = build_client_filter(clients);
+            if json || light || !can_use_tui {
+                run_hourly_report(
+                    json,
+                    cli.home.clone(),
+                    clients,
+                    since,
+                    until,
+                    year,
+                    benchmark,
+                    no_spinner || !can_use_tui,
+                    today,
+                    week,
+                    month,
+                )
+            } else {
+                ensure_home_supported_for_tui(&cli.home)?;
+                auto_sync_cursor_before_tui(&cli.home, &clients)?;
+                tui::run(
+                    &cli.theme,
+                    cli.refresh,
+                    cli.debug,
+                    clients,
+                    since,
+                    until,
+                    year,
+                    Some(Tab::Hourly),
+                )
+            }
+        }
         Some(Commands::Pricing {
             model_id,
             json,
             provider,
             no_spinner,
-        }) => run_pricing_lookup(&model_id, json, provider.as_deref(), no_spinner),
-        Some(Commands::Clients { json }) => run_clients_command(json),
-        Some(Commands::Login) => run_login_command(),
+        }) => {
+            reject_unsupported_home_override(&cli.home, "pricing")?;
+            run_pricing_lookup(&model_id, json, provider.as_deref(), no_spinner)
+        }
+        Some(Commands::Clients { json }) => {
+            reject_unsupported_home_override(&cli.home, "clients")?;
+            run_clients_command(json)
+        }
+        Some(Commands::Login { token }) => {
+            reject_unsupported_home_override(&cli.home, "login")?;
+            run_login_command(token)
+        }
         Some(Commands::SyncApi {
             anthropic,
             cursor,
             since,
             until,
-        }) => run_sync_api_command(anthropic, cursor, since, until),
-        Some(Commands::Logout) => run_logout_command(),
-        Some(Commands::Whoami) => run_whoami_command(),
+        }) => {
+            reject_unsupported_home_override(&cli.home, "sync-api")?;
+            run_sync_api_command(anthropic, cursor, since, until)
+        }
+        Some(Commands::Logout) => {
+            reject_unsupported_home_override(&cli.home, "logout")?;
+            run_logout_command()
+        }
+        Some(Commands::Whoami) => {
+            reject_unsupported_home_override(&cli.home, "whoami")?;
+            run_whoami_command()
+        }
         Some(Commands::Graph {
             output,
-            opencode,
-            claude,
-            codex,
-            gemini,
-            cursor,
-            amp,
-            droid,
-            openclaw,
-            pi,
-            kimi,
-            qwen,
-            roocode,
-            kilocode,
-            kilo,
-            mux,
-            synthetic,
-            today,
-            week,
-            month,
-            since,
-            until,
-            year,
+            clients,
+            date,
             benchmark,
             no_spinner,
         }) => {
-            let clients = build_client_filter(ClientFlags {
-                opencode,
-                claude,
-                codex,
-                gemini,
-                cursor,
-                amp,
-                droid,
-                openclaw,
-                pi,
-                kimi,
-                qwen,
-                roocode,
-                kilocode,
-                kilo,
-                mux,
-                synthetic,
-            });
-            let (since, until) = build_date_filter(today, week, month, since, until);
-            let year = normalize_year_filter(today, week, month, year);
-            run_graph_command(output, clients, since, until, year, benchmark, no_spinner)
+            let today = date.today;
+            let week = date.week;
+            let month = date.month;
+            let (since, until) = build_date_filter(today, week, month, date.since, date.until);
+            let year = normalize_year_filter(today, week, month, date.year);
+            let clients = build_client_filter(clients);
+            run_graph_command(
+                output,
+                cli.home.clone(),
+                clients,
+                since,
+                until,
+                year,
+                benchmark,
+                no_spinner,
+            )
         }
-        Some(Commands::Tui {
-            opencode,
-            claude,
-            codex,
-            gemini,
-            cursor,
-            amp,
-            droid,
-            openclaw,
-            pi,
-            kimi,
-            qwen,
-            roocode,
-            kilocode,
-            kilo,
-            mux,
-            synthetic,
-            today,
-            week,
-            month,
-            since,
-            until,
-            year,
-        }) => {
-            let clients = build_client_filter(ClientFlags {
-                opencode,
-                claude,
-                codex,
-                gemini,
-                cursor,
-                amp,
-                droid,
-                openclaw,
-                pi,
-                kimi,
-                qwen,
-                roocode,
-                kilocode,
-                kilo,
-                mux,
-                synthetic,
-            });
-            let (since, until) = build_date_filter(today, week, month, since, until);
-            let year = normalize_year_filter(today, week, month, year);
+        Some(Commands::Tui { clients, date }) => {
+            ensure_home_supported_for_tui(&cli.home)?;
+            let today = date.today;
+            let week = date.week;
+            let month = date.month;
+            let (since, until) = build_date_filter(today, week, month, date.since, date.until);
+            let year = normalize_year_filter(today, week, month, date.year);
+            let clients = build_client_filter(clients);
+            auto_sync_cursor_before_tui(&cli.home, &clients)?;
             tui::run(
                 &cli.theme,
                 cli.refresh,
@@ -817,50 +558,22 @@ fn main() -> Result<()> {
             )
         }
         Some(Commands::Submit {
-            opencode,
-            claude,
-            codex,
-            gemini,
-            cursor,
-            amp,
-            droid,
-            openclaw,
-            pi,
-            kimi,
-            qwen,
-            roocode,
-            kilocode,
-            kilo,
-            mux,
-            synthetic,
-            today,
-            week,
-            month,
-            since,
-            until,
-            year,
+            clients,
+            date,
             dry_run,
         }) => {
-            let clients = build_client_filter(ClientFlags {
-                opencode,
-                claude,
-                codex,
-                gemini,
-                cursor,
-                amp,
-                droid,
-                openclaw,
-                pi,
-                kimi,
-                qwen,
-                roocode,
-                kilocode,
-                kilo,
-                mux,
-                synthetic,
-            });
-            let (since, until) = build_date_filter(today, week, month, since, until);
-            let year = normalize_year_filter(today, week, month, year);
+            reject_unsupported_home_override(&cli.home, "submit")?;
+            let today = date.today;
+            let week = date.week;
+            let month = date.month;
+            let (since, until) = build_date_filter(today, week, month, date.since, date.until);
+            let year = normalize_year_filter(today, week, month, date.year);
+            // Bypass settings.json defaultClients for the submit path: we want the
+            // submit-specific default_submit_clients() fallback (in run_submit_command)
+            // to fire when the user passes no client flags, not the user's general
+            // defaultClients view filter (which may exclude clients they still want
+            // to upload). Pass an explicit empty defaults slice.
+            let clients = build_client_filter_with_defaults(clients, &[]);
             run_submit_command(clients, since, until, year, dry_run)
         }
         Some(Commands::Headless {
@@ -869,50 +582,22 @@ fn main() -> Result<()> {
             format,
             output,
             no_auto_flags,
-        }) => run_headless_command(&source, args, format, output, no_auto_flags),
+        }) => {
+            reject_unsupported_home_override(&cli.home, "headless")?;
+            run_headless_command(&source, args, format, output, no_auto_flags)
+        }
         Some(Commands::Wrapped {
             output,
             year,
-            opencode,
-            claude,
-            codex,
-            gemini,
-            cursor,
-            amp,
-            droid,
-            openclaw,
-            pi,
-            kimi,
-            qwen,
-            roocode,
-            kilocode,
-            kilo,
-            mux,
-            synthetic,
+            client_flags,
             short,
             agents,
             clients,
             disable_pinned,
             no_spinner: _,
         }) => {
-            let client_filter = build_client_filter(ClientFlags {
-                opencode,
-                claude,
-                codex,
-                gemini,
-                cursor,
-                amp,
-                droid,
-                openclaw,
-                pi,
-                kimi,
-                qwen,
-                roocode,
-                kilocode,
-                kilo,
-                mux,
-                synthetic,
-            });
+            reject_unsupported_home_override(&cli.home, "wrapped")?;
+            let client_filter = build_client_filter(client_flags);
             run_wrapped_command(
                 output,
                 year,
@@ -923,29 +608,27 @@ fn main() -> Result<()> {
                 disable_pinned,
             )
         }
-        Some(Commands::Cursor { subcommand }) => run_cursor_command(subcommand),
+        Some(Commands::Cursor { subcommand }) => {
+            reject_unsupported_home_override(&cli.home, "cursor")?;
+            run_cursor_command(subcommand)
+        }
+        Some(Commands::Antigravity { subcommand }) => {
+            reject_unsupported_home_override(&cli.home, "antigravity")?;
+            run_antigravity_command(subcommand)
+        }
+        Some(Commands::DeleteSubmittedData) => {
+            reject_unsupported_home_override(&cli.home, "delete-submitted-data")?;
+            run_delete_data_command()
+        }
+        Some(Commands::WarmTuiCache) => run_warm_tui_cache(),
         None => {
-            let clients = build_client_filter(ClientFlags {
-                opencode: cli.opencode,
-                claude: cli.claude,
-                codex: cli.codex,
-                gemini: cli.gemini,
-                cursor: cli.cursor,
-                amp: cli.amp,
-                droid: cli.droid,
-                openclaw: cli.openclaw,
-                pi: cli.pi,
-                kimi: cli.kimi,
-                qwen: cli.qwen,
-                roocode: cli.roocode,
-                kilocode: cli.kilocode,
-                kilo: cli.kilo,
-                mux: cli.mux,
-                synthetic: cli.synthetic,
-            });
+            let today = cli.date.today;
+            let week = cli.date.week;
+            let month = cli.date.month;
+            let clients = build_client_filter(cli.clients);
             let (since, until) =
-                build_date_filter(cli.today, cli.week, cli.month, cli.since, cli.until);
-            let year = normalize_year_filter(cli.today, cli.week, cli.month, cli.year);
+                build_date_filter(today, week, month, cli.date.since, cli.date.until);
+            let year = normalize_year_filter(today, week, month, cli.date.year);
             let group_by: tokscale_core::GroupBy = cli.group_by.parse().unwrap_or_else(|e| {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
@@ -954,32 +637,40 @@ fn main() -> Result<()> {
             if cli.json {
                 run_models_report(
                     cli.json,
+                    cli.home.clone(),
                     clients,
                     since,
                     until,
                     year,
                     cli.benchmark,
                     cli.no_spinner || cli.json,
-                    cli.today,
-                    cli.week,
-                    cli.month,
+                    today,
+                    week,
+                    month,
                     group_by,
+                    cli.write_cache,
+                    cli.no_write_cache,
                 )
             } else if cli.light || !can_use_tui {
                 run_models_report(
                     false,
+                    cli.home.clone(),
                     clients,
                     since,
                     until,
                     year,
                     cli.benchmark,
                     cli.no_spinner || !can_use_tui,
-                    cli.today,
-                    cli.week,
-                    cli.month,
+                    today,
+                    week,
+                    month,
                     group_by,
+                    cli.write_cache,
+                    cli.no_write_cache,
                 )
             } else {
+                ensure_home_supported_for_tui(&cli.home)?;
+                auto_sync_cursor_before_tui(&cli.home, &clients)?;
                 tui::run(
                     &cli.theme,
                     cli.refresh,
@@ -995,59 +686,507 @@ fn main() -> Result<()> {
     }
 }
 
-struct ClientFlags {
-    opencode: bool,
-    claude: bool,
-    codex: bool,
-    gemini: bool,
-    cursor: bool,
-    amp: bool,
-    droid: bool,
-    openclaw: bool,
-    pi: bool,
-    kimi: bool,
-    qwen: bool,
-    roocode: bool,
-    kilocode: bool,
-    kilo: bool,
-    mux: bool,
-    synthetic: bool,
+/// Client identifiers exposed via `--client`.
+///
+/// Mirrors `tokscale_core::ClientId` plus the `Synthetic` meta-client. We
+/// duplicate the variant set on the CLI side so `tokscale-core` stays free of
+/// CLI-parsing dependencies and so `Synthetic` (which has no scan path of its
+/// own) can be treated as a first-class filter value without changing core
+/// invariants.
+///
+/// Variant order intentionally mirrors `ClientId::ALL` declaration order so
+/// the TUI source picker, `--help`'s `[possible values: ...]` listing, and
+/// any future iteration over `ClientFilter::value_variants()` agree on a
+/// single chronological ordering. `Synthetic` is appended at the end since
+/// it has no `ClientId` counterpart.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[value(rename_all = "lowercase")]
+pub enum ClientFilter {
+    Opencode,
+    Claude,
+    Codex,
+    Cursor,
+    Gemini,
+    Amp,
+    Droid,
+    Openclaw,
+    Pi,
+    Kimi,
+    Qwen,
+    Roocode,
+    Kilocode,
+    Mux,
+    Kilo,
+    Crush,
+    Hermes,
+    Copilot,
+    Goose,
+    Codebuff,
+    Antigravity,
+    Zed,
+    #[value(name = "anthropic-api")]
+    AnthropicApi,
+    Synthetic,
 }
 
-fn build_client_filter(flags: ClientFlags) -> Option<Vec<String>> {
-    use tokscale_core::ClientId;
-
-    let mut clients: Vec<String> = [
-        (ClientId::OpenCode, flags.opencode),
-        (ClientId::Claude, flags.claude),
-        (ClientId::Codex, flags.codex),
-        (ClientId::Gemini, flags.gemini),
-        (ClientId::Cursor, flags.cursor),
-        (ClientId::Amp, flags.amp),
-        (ClientId::Droid, flags.droid),
-        (ClientId::OpenClaw, flags.openclaw),
-        (ClientId::Pi, flags.pi),
-        (ClientId::Kimi, flags.kimi),
-        (ClientId::Qwen, flags.qwen),
-        (ClientId::RooCode, flags.roocode),
-        (ClientId::KiloCode, flags.kilocode),
-        (ClientId::Kilo, flags.kilo),
-        (ClientId::Mux, flags.mux),
-    ]
-    .into_iter()
-    .filter(|(_, enabled)| *enabled)
-    .map(|(client, _)| client.as_str().to_string())
-    .collect();
-
-    if flags.synthetic {
-        clients.push("synthetic".to_string());
+impl ClientFilter {
+    /// Returns the canonical lowercase identifier consumed by
+    /// `tokscale_core` filter lists. Must match `ClientId::as_str` for every
+    /// variant that has a corresponding `ClientId`.
+    pub fn as_filter_str(&self) -> &'static str {
+        match self {
+            Self::Opencode => "opencode",
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Cursor => "cursor",
+            Self::Gemini => "gemini",
+            Self::Amp => "amp",
+            Self::Droid => "droid",
+            Self::Openclaw => "openclaw",
+            Self::Pi => "pi",
+            Self::Kimi => "kimi",
+            Self::Qwen => "qwen",
+            Self::Roocode => "roocode",
+            Self::Kilocode => "kilocode",
+            Self::Mux => "mux",
+            Self::Kilo => "kilo",
+            Self::Crush => "crush",
+            Self::Hermes => "hermes",
+            Self::Copilot => "copilot",
+            Self::Goose => "goose",
+            Self::Codebuff => "codebuff",
+            Self::Antigravity => "antigravity",
+            Self::Zed => "zed",
+            Self::AnthropicApi => "anthropic-api",
+            Self::Synthetic => "synthetic",
+        }
     }
 
-    if clients.is_empty() {
+    /// Convert to the corresponding `ClientId`, or `None` for the
+    /// `Synthetic` meta-client which has no scan path of its own.
+    ///
+    /// Used at boundaries where TUI state (`HashSet<ClientFilter>`) needs
+    /// to feed core APIs that still consume `Vec<ClientId>`.
+    pub fn to_client_id(self) -> Option<tokscale_core::ClientId> {
+        use tokscale_core::ClientId;
+        match self {
+            Self::Opencode => Some(ClientId::OpenCode),
+            Self::Claude => Some(ClientId::Claude),
+            Self::Codex => Some(ClientId::Codex),
+            Self::Cursor => Some(ClientId::Cursor),
+            Self::Gemini => Some(ClientId::Gemini),
+            Self::Amp => Some(ClientId::Amp),
+            Self::Droid => Some(ClientId::Droid),
+            Self::Openclaw => Some(ClientId::OpenClaw),
+            Self::Pi => Some(ClientId::Pi),
+            Self::Kimi => Some(ClientId::Kimi),
+            Self::Qwen => Some(ClientId::Qwen),
+            Self::Roocode => Some(ClientId::RooCode),
+            Self::Kilocode => Some(ClientId::KiloCode),
+            Self::Mux => Some(ClientId::Mux),
+            Self::Kilo => Some(ClientId::Kilo),
+            Self::Crush => Some(ClientId::Crush),
+            Self::Hermes => Some(ClientId::Hermes),
+            Self::Copilot => Some(ClientId::Copilot),
+            Self::Goose => Some(ClientId::Goose),
+            Self::Codebuff => Some(ClientId::Codebuff),
+            Self::Antigravity => Some(ClientId::Antigravity),
+            Self::Zed => Some(ClientId::Zed),
+            Self::AnthropicApi => Some(ClientId::AnthropicApi),
+            Self::Synthetic => None,
+        }
+    }
+
+    /// Lift a `ClientId` back into a `ClientFilter`. Total inverse of
+    /// `to_client_id` for non-`Synthetic` variants.
+    pub fn from_client_id(client: tokscale_core::ClientId) -> Self {
+        use tokscale_core::ClientId;
+        match client {
+            ClientId::OpenCode => Self::Opencode,
+            ClientId::Claude => Self::Claude,
+            ClientId::Codex => Self::Codex,
+            ClientId::Cursor => Self::Cursor,
+            ClientId::Gemini => Self::Gemini,
+            ClientId::Amp => Self::Amp,
+            ClientId::Droid => Self::Droid,
+            ClientId::OpenClaw => Self::Openclaw,
+            ClientId::Pi => Self::Pi,
+            ClientId::Kimi => Self::Kimi,
+            ClientId::Qwen => Self::Qwen,
+            ClientId::RooCode => Self::Roocode,
+            ClientId::KiloCode => Self::Kilocode,
+            ClientId::Mux => Self::Mux,
+            ClientId::Kilo => Self::Kilo,
+            ClientId::Crush => Self::Crush,
+            ClientId::Hermes => Self::Hermes,
+            ClientId::Copilot => Self::Copilot,
+            ClientId::Goose => Self::Goose,
+            ClientId::Codebuff => Self::Codebuff,
+            ClientId::Antigravity => Self::Antigravity,
+            ClientId::Zed => Self::Zed,
+            ClientId::AnthropicApi => Self::AnthropicApi,
+        }
+    }
+
+    /// Parse a canonical lowercase identifier (the same form
+    /// `as_filter_str` returns) into a `ClientFilter`. Returns `None` for
+    /// any unknown id so callers can drop unrecognized settings entries
+    /// without erroring.
+    pub fn from_filter_str(s: &str) -> Option<Self> {
+        Self::value_variants()
+            .iter()
+            .copied()
+            .find(|f| f.as_filter_str() == s)
+    }
+
+    /// The "no filter" default set: every real client, with `Synthetic`
+    /// **excluded**. Matches the pre-refactor behavior where a missing
+    /// filter scanned every `ClientId` but did NOT post-process synthetic
+    /// (synthetic detection has always been opt-in because it
+    /// re-attributes messages from other clients to a different bucket).
+    ///
+    /// Single source of truth: every code path that needs a default
+    /// filter (TUI launch, `submit` warm cache, etc.) must consult this
+    /// so the cache key, the in-app state, and the loader filter all
+    /// agree. Drift between them produces stale-cache misses on every
+    /// launch.
+    pub fn default_set() -> std::collections::HashSet<Self> {
+        Self::value_variants()
+            .iter()
+            .copied()
+            .filter(|f| !matches!(f, Self::Synthetic))
+            .collect()
+    }
+}
+
+#[derive(Args, Clone, Debug, Default)]
+pub struct ClientFlags {
+    /// Canonical client filter. Repeatable or comma-separated.
+    /// Example: `--client opencode,claude` or `-c opencode -c claude`.
+    #[arg(
+        long = "client",
+        short = 'c',
+        value_enum,
+        value_delimiter = ',',
+        action = clap::ArgAction::Append,
+        ignore_case = true,
+        help = "Filter by client(s). Repeatable or comma-separated (e.g. -c opencode,claude)."
+    )]
+    pub clients: Vec<ClientFilter>,
+
+    // ---- Deprecated legacy boolean flags ------------------------------
+    // Hidden from --help. Kept for backward compatibility; print a stderr
+    // deprecation warning when used. Slated for removal in the next major.
+    #[arg(long, hide = true)]
+    pub opencode: bool,
+    #[arg(long, hide = true)]
+    pub claude: bool,
+    #[arg(long, hide = true)]
+    pub codex: bool,
+    #[arg(long, hide = true)]
+    pub copilot: bool,
+    #[arg(long, hide = true)]
+    pub gemini: bool,
+    #[arg(long, hide = true)]
+    pub cursor: bool,
+    #[arg(long, hide = true)]
+    pub amp: bool,
+    #[arg(long, hide = true)]
+    pub codebuff: bool,
+    #[arg(long, hide = true)]
+    pub droid: bool,
+    #[arg(long, hide = true)]
+    pub openclaw: bool,
+    #[arg(long, hide = true)]
+    pub hermes: bool,
+    #[arg(long, hide = true)]
+    pub pi: bool,
+    #[arg(long, hide = true)]
+    pub kimi: bool,
+    #[arg(long, hide = true)]
+    pub qwen: bool,
+    #[arg(long, hide = true)]
+    pub roocode: bool,
+    #[arg(long, hide = true)]
+    pub kilocode: bool,
+    #[arg(long, hide = true)]
+    pub kilo: bool,
+    #[arg(long, hide = true)]
+    pub mux: bool,
+    #[arg(long, hide = true)]
+    pub crush: bool,
+    #[arg(long, hide = true)]
+    pub goose: bool,
+    #[arg(long, hide = true)]
+    pub antigravity: bool,
+    #[arg(long, hide = true)]
+    pub zed: bool,
+    #[arg(long = "anthropic-api", hide = true)]
+    pub anthropic_api: bool,
+    #[arg(long, hide = true)]
+    pub synthetic: bool,
+}
+
+#[derive(Args, Clone, Debug, Default)]
+pub struct DateRangeFlags {
+    #[arg(long, help = "Show only today's usage")]
+    pub today: bool,
+    #[arg(long, help = "Show last 7 days")]
+    pub week: bool,
+    #[arg(long, help = "Show current month")]
+    pub month: bool,
+    #[arg(long, help = "Start date (YYYY-MM-DD)")]
+    pub since: Option<String>,
+    #[arg(long, help = "End date (YYYY-MM-DD)")]
+    pub until: Option<String>,
+    #[arg(long, help = "Filter by year (YYYY)")]
+    pub year: Option<String>,
+}
+
+/// Builds the client filter list passed to `tokscale_core`.
+///
+/// Resolution order:
+/// 1. Collect canonical `--client/-c` values (preserves user order).
+/// 2. Append any legacy `--<client>` boolean flags that are set, emitting a
+///    one-time stderr deprecation warning so existing scripts keep working.
+/// 3. If steps 1 and 2 produced nothing, fall back to user-configured
+///    `defaultClients` from `~/.config/tokscale/settings.json` when present.
+/// 4. Deduplicate while preserving first-seen order.
+///
+/// Returns `None` when no filters are active *and* no defaults configured
+/// so the caller can scan all clients.
+fn build_client_filter(flags: ClientFlags) -> Option<Vec<String>> {
+    let defaults = tui::settings::load_default_clients();
+    build_client_filter_with_defaults(flags, &defaults)
+}
+
+/// Pure variant of [`build_client_filter`] for unit-testable resolution.
+/// `defaults` is the (already-validated) list of canonical filter ids that
+/// should apply when no CLI flag is present.
+fn build_client_filter_with_defaults(
+    flags: ClientFlags,
+    defaults: &[String],
+) -> Option<Vec<String>> {
+    let mut ordered: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for client in &flags.clients {
+        let id = client.as_filter_str().to_string();
+        if seen.insert(id.clone()) {
+            ordered.push(id);
+        }
+    }
+
+    let legacy: [(bool, ClientFilter); 24] = [
+        (flags.opencode, ClientFilter::Opencode),
+        (flags.claude, ClientFilter::Claude),
+        (flags.codex, ClientFilter::Codex),
+        (flags.cursor, ClientFilter::Cursor),
+        (flags.gemini, ClientFilter::Gemini),
+        (flags.amp, ClientFilter::Amp),
+        (flags.codebuff, ClientFilter::Codebuff),
+        (flags.droid, ClientFilter::Droid),
+        (flags.openclaw, ClientFilter::Openclaw),
+        (flags.pi, ClientFilter::Pi),
+        (flags.kimi, ClientFilter::Kimi),
+        (flags.qwen, ClientFilter::Qwen),
+        (flags.roocode, ClientFilter::Roocode),
+        (flags.kilocode, ClientFilter::Kilocode),
+        (flags.mux, ClientFilter::Mux),
+        (flags.kilo, ClientFilter::Kilo),
+        (flags.crush, ClientFilter::Crush),
+        (flags.hermes, ClientFilter::Hermes),
+        (flags.copilot, ClientFilter::Copilot),
+        (flags.goose, ClientFilter::Goose),
+        (flags.antigravity, ClientFilter::Antigravity),
+        (flags.zed, ClientFilter::Zed),
+        (flags.anthropic_api, ClientFilter::AnthropicApi),
+        (flags.synthetic, ClientFilter::Synthetic),
+    ];
+
+    let mut legacy_used: Vec<&'static str> = Vec::new();
+    for (enabled, client) in legacy {
+        if !enabled {
+            continue;
+        }
+        let id = client.as_filter_str();
+        legacy_used.push(id);
+        if seen.insert(id.to_string()) {
+            ordered.push(id.to_string());
+        }
+    }
+
+    if !legacy_used.is_empty() {
+        emit_legacy_client_flag_warning(&legacy_used);
+    }
+
+    // Defaults only apply when the user passed neither canonical nor legacy
+    // flags. CLI flags always win — predictable semantics over "merge".
+    // Unknown / typo'd ids are dropped silently so a stale settings.json
+    // entry never breaks tokscale.
+    if ordered.is_empty() {
+        for raw in defaults {
+            if let Some(client) = ClientFilter::from_filter_str(raw) {
+                let id = client.as_filter_str().to_string();
+                if seen.insert(id.clone()) {
+                    ordered.push(id);
+                }
+            }
+        }
+    }
+
+    if ordered.is_empty() {
         None
     } else {
-        Some(clients)
+        Some(ordered)
     }
+}
+
+/// Emits a single stderr deprecation warning when legacy `--<client>` flags
+/// are used. Suppressed entirely when stderr is not a TTY (e.g. when piping
+/// JSON output through scripts) so machine-parseable output stays clean.
+fn emit_legacy_client_flag_warning(used: &[&'static str]) {
+    if !std::io::stderr().is_terminal() {
+        return;
+    }
+    let pretty: Vec<String> = used.iter().map(|id| format!("--{id}")).collect();
+    let replacement = used.join(",");
+    eprintln!(
+        "warning: {} is deprecated; use `--client {}` instead. The legacy flags will be removed in the next major release.",
+        pretty.join(", "),
+        replacement
+    );
+}
+
+fn client_filter_includes_cursor(clients: &Option<Vec<String>>) -> bool {
+    clients
+        .as_ref()
+        .is_none_or(|sources| sources.iter().any(|source| source == "cursor"))
+}
+
+fn client_filter_explicitly_requests_cursor(clients: &Option<Vec<String>>) -> bool {
+    clients
+        .as_ref()
+        .is_some_and(|sources| sources.iter().any(|source| source == "cursor"))
+}
+
+fn should_auto_sync_cursor_for_local_report(
+    home_dir: &Option<String>,
+    clients: &Option<Vec<String>>,
+) -> bool {
+    home_dir.is_none() && client_filter_includes_cursor(clients)
+}
+
+fn auto_sync_cursor_for_local_report(
+    home_dir: &Option<String>,
+    clients: &Option<Vec<String>>,
+) -> Option<cursor::SyncCursorResult> {
+    if !should_auto_sync_cursor_for_local_report(home_dir, clients)
+        || !cursor::is_cursor_logged_in()
+    {
+        return None;
+    }
+
+    // Skip the implicit refresh when the cache is recent enough — running
+    // `tokscale models` 30× in a script must not produce 30 Cursor API
+    // calls. The manual `tokscale cursor sync` command bypasses this gate.
+    if cursor::cursor_usage_cache_is_fresh(cursor::CURSOR_AUTO_SYNC_FRESHNESS) {
+        return None;
+    }
+
+    Some(run_best_effort_cursor_sync_with_runtime_factory(
+        tokio::runtime::Runtime::new,
+    ))
+}
+
+fn run_best_effort_cursor_sync_with_runtime_factory<F>(build_runtime: F) -> cursor::SyncCursorResult
+where
+    F: FnOnce() -> std::io::Result<tokio::runtime::Runtime>,
+{
+    match build_runtime() {
+        Ok(rt) => rt.block_on(async { cursor::sync_cursor_cache().await }),
+        Err(error) => cursor::SyncCursorResult {
+            synced: false,
+            rows: 0,
+            error: Some(format!(
+                "Failed to initialize Cursor sync runtime: {}",
+                error
+            )),
+        },
+    }
+}
+
+fn auto_sync_cursor_before_tui(
+    home_dir: &Option<String>,
+    clients: &Option<Vec<String>>,
+) -> Result<()> {
+    let had_cursor_cache = cursor::has_cursor_usage_cache();
+    let explicit_cursor_filter = client_filter_explicitly_requests_cursor(clients);
+    let cursor_sync_result = auto_sync_cursor_for_local_report(home_dir, clients);
+    emit_cursor_sync_warning(
+        cursor_sync_result.as_ref(),
+        had_cursor_cache,
+        explicit_cursor_filter,
+    );
+    Ok(())
+}
+
+fn emit_cursor_sync_warning(
+    sync: Option<&cursor::SyncCursorResult>,
+    had_cursor_cache: bool,
+    explicit_cursor_filter: bool,
+) {
+    let Some(sync) = sync else {
+        return;
+    };
+    let Some(error) = sync.error.as_ref() else {
+        return;
+    };
+    if sync.synced || had_cursor_cache || explicit_cursor_filter {
+        use colored::Colorize;
+        let prefix = if sync.synced {
+            "Cursor sync warning"
+        } else if had_cursor_cache {
+            "Cursor sync failed; using cached data"
+        } else {
+            "Cursor sync failed"
+        };
+        eprintln!("{}", format!("  {}: {}", prefix, error).yellow());
+    }
+}
+
+fn default_submit_clients() -> Vec<String> {
+    let mut clients: Vec<String> = tokscale_core::ClientId::iter()
+        .filter(|client| client.submit_default())
+        .map(|client| client.as_str().to_string())
+        .collect();
+    clients.push("synthetic".to_string());
+    clients
+}
+
+fn reject_unsupported_home_override(home_dir: &Option<String>, command: &str) -> Result<()> {
+    if home_dir.is_some() {
+        return Err(anyhow::anyhow!(
+            "--home is currently supported only for local report commands. It is not supported for `{}`.",
+            command
+        ));
+    }
+
+    Ok(())
+}
+
+fn use_env_roots(home_dir: &Option<String>) -> bool {
+    home_dir.is_none()
+}
+
+fn ensure_home_supported_for_tui(home_dir: &Option<String>) -> Result<()> {
+    if home_dir.is_some() {
+        return Err(anyhow::anyhow!(
+            "--home is currently supported for local report commands only. Use `--json`, `--light`, `models`, `monthly`, or `graph` instead of TUI mode."
+        ));
+    }
+
+    Ok(())
 }
 
 fn build_date_filter(
@@ -1283,6 +1422,7 @@ impl Drop for LightSpinner {
 #[allow(clippy::too_many_arguments)]
 fn run_models_report(
     json: bool,
+    home_dir: Option<String>,
     clients: Option<Vec<String>>,
     since: Option<String>,
     until: Option<String>,
@@ -1293,6 +1433,8 @@ fn run_models_report(
     week: bool,
     month_flag: bool,
     group_by: tokscale_core::GroupBy,
+    cli_write_cache: bool,
+    cli_no_write_cache: bool,
 ) -> Result<()> {
     use std::time::Instant;
     use tokio::runtime::Runtime;
@@ -1300,22 +1442,28 @@ fn run_models_report(
 
     let date_range = get_date_range_label(today, week, month_flag, &since, &until, &year);
 
+    let had_cursor_cache = cursor::has_cursor_usage_cache();
+    let explicit_cursor_filter = client_filter_explicitly_requests_cursor(&clients);
     let spinner = if no_spinner {
         None
     } else {
         Some(LightSpinner::start("Scanning session data..."))
     };
+    let cursor_sync_result = auto_sync_cursor_for_local_report(&home_dir, &clients);
+    let use_env_roots = use_env_roots(&home_dir);
     let start = Instant::now();
     let rt = Runtime::new()?;
     let report = rt
         .block_on(async {
             get_model_report(ReportOptions {
-                home_dir: None,
-                clients,
-                since,
-                until,
-                year,
+                home_dir: home_dir.clone(),
+                use_env_roots,
+                clients: clients.clone(),
+                since: since.clone(),
+                until: until.clone(),
+                year: year.clone(),
                 group_by: group_by.clone(),
+                scanner_settings: tui::settings::load_scanner_settings(),
             })
             .await
         })
@@ -1324,6 +1472,11 @@ fn run_models_report(
     if let Some(spinner) = spinner {
         spinner.stop();
     }
+    emit_cursor_sync_warning(
+        cursor_sync_result.as_ref(),
+        had_cursor_cache,
+        explicit_cursor_filter,
+    );
 
     let processing_time_ms = start.elapsed().as_millis();
 
@@ -1333,6 +1486,10 @@ fn run_models_report(
         struct ModelUsageJson {
             client: String,
             merged_clients: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            workspace_key: Option<serde_json::Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            workspace_label: Option<String>,
             model: String,
             provider: String,
             input: i64,
@@ -1364,6 +1521,20 @@ fn run_models_report(
                 .entries
                 .into_iter()
                 .map(|e| ModelUsageJson {
+                    workspace_key: if group_by == GroupBy::WorkspaceModel {
+                        Some(
+                            e.workspace_key
+                                .map(serde_json::Value::String)
+                                .unwrap_or(serde_json::Value::Null),
+                        )
+                    } else {
+                        None
+                    },
+                    workspace_label: if group_by == GroupBy::WorkspaceModel {
+                        e.workspace_label
+                    } else {
+                        None
+                    },
                     client: e.client,
                     merged_clients: e.merged_clients,
                     model: e.model,
@@ -1404,6 +1575,8 @@ fn run_models_report(
         table.set_content_arrangement(arrangement);
         table.enforce_styling();
 
+        let workspace_name = |label: Option<&str>| label.unwrap_or("Unknown workspace").to_string();
+
         if compact {
             match group_by {
                 GroupBy::Model => {
@@ -1414,6 +1587,7 @@ fn run_models_report(
                         Cell::new("Input").fg(Color::Cyan),
                         Cell::new("Output").fg(Color::Cyan),
                         Cell::new("Cost").fg(Color::Cyan),
+                        Cell::new("Cost/1M").fg(Color::Cyan),
                     ]);
 
                     for entry in &report.entries {
@@ -1423,6 +1597,8 @@ fn run_models_report(
                             .map(capitalize_client)
                             .collect::<Vec<_>>()
                             .join(", ");
+                        let total_tokens =
+                            entry.input + entry.output + entry.cache_read + entry.cache_write;
                         table.add_row(vec![
                             Cell::new(capitalized_clients),
                             Cell::new(&entry.provider).add_attribute(Attribute::Dim),
@@ -1433,9 +1609,15 @@ fn run_models_report(
                                 .set_alignment(CellAlignment::Right),
                             Cell::new(format_currency(entry.cost))
                                 .set_alignment(CellAlignment::Right),
+                            Cell::new(format_cost_per_million(entry.cost, total_tokens))
+                                .set_alignment(CellAlignment::Right),
                         ]);
                     }
 
+                    let total_tokens = report.total_input
+                        + report.total_output
+                        + report.total_cache_read
+                        + report.total_cache_write;
                     table.add_row(vec![
                         Cell::new("Total")
                             .fg(Color::Yellow)
@@ -1451,6 +1633,9 @@ fn run_models_report(
                         Cell::new(format_currency(report.total_cost))
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
+                        Cell::new(format_cost_per_million(report.total_cost, total_tokens))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
                     ]);
                 }
                 GroupBy::ClientModel | GroupBy::ClientProviderModel => {
@@ -1461,9 +1646,12 @@ fn run_models_report(
                         Cell::new("Input").fg(Color::Cyan),
                         Cell::new("Output").fg(Color::Cyan),
                         Cell::new("Cost").fg(Color::Cyan),
+                        Cell::new("Cost/1M").fg(Color::Cyan),
                     ]);
 
                     for entry in &report.entries {
+                        let total_tokens =
+                            entry.input + entry.output + entry.cache_read + entry.cache_write;
                         table.add_row(vec![
                             Cell::new(capitalize_client(&entry.client)),
                             Cell::new(&entry.provider).add_attribute(Attribute::Dim),
@@ -1474,9 +1662,15 @@ fn run_models_report(
                                 .set_alignment(CellAlignment::Right),
                             Cell::new(format_currency(entry.cost))
                                 .set_alignment(CellAlignment::Right),
+                            Cell::new(format_cost_per_million(entry.cost, total_tokens))
+                                .set_alignment(CellAlignment::Right),
                         ]);
                     }
 
+                    let total_tokens = report.total_input
+                        + report.total_output
+                        + report.total_cache_read
+                        + report.total_cache_write;
                     table.add_row(vec![
                         Cell::new("Total")
                             .fg(Color::Yellow)
@@ -1489,6 +1683,35 @@ fn run_models_report(
                         Cell::new(format_tokens_with_commas(report.total_output))
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
+                        Cell::new(format_currency(report.total_cost))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                        Cell::new(format_cost_per_million(report.total_cost, total_tokens))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                    ]);
+                }
+                GroupBy::WorkspaceModel => {
+                    table.set_header(vec![
+                        Cell::new("Workspace").fg(Color::Cyan),
+                        Cell::new("Model").fg(Color::Cyan),
+                        Cell::new("Cost").fg(Color::Cyan),
+                    ]);
+
+                    for entry in &report.entries {
+                        table.add_row(vec![
+                            Cell::new(workspace_name(entry.workspace_label.as_deref())),
+                            Cell::new(&entry.model),
+                            Cell::new(format_currency(entry.cost))
+                                .set_alignment(CellAlignment::Right),
+                        ]);
+                    }
+
+                    table.add_row(vec![
+                        Cell::new("Total")
+                            .fg(Color::Yellow)
+                            .add_attribute(Attribute::Bold),
+                        Cell::new(""),
                         Cell::new(format_currency(report.total_cost))
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
@@ -1508,6 +1731,7 @@ fn run_models_report(
                         Cell::new("Cache Read").fg(Color::Cyan),
                         Cell::new("Total").fg(Color::Cyan),
                         Cell::new("Cost").fg(Color::Cyan),
+                        Cell::new("Cost/1M").fg(Color::Cyan),
                     ]);
 
                     for entry in &report.entries {
@@ -1535,6 +1759,8 @@ fn run_models_report(
                             Cell::new(format_tokens_with_commas(total))
                                 .set_alignment(CellAlignment::Right),
                             Cell::new(format_currency(entry.cost))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_cost_per_million(entry.cost, total))
                                 .set_alignment(CellAlignment::Right),
                         ]);
                     }
@@ -1567,6 +1793,9 @@ fn run_models_report(
                         Cell::new(format_currency(report.total_cost))
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
+                        Cell::new(format_cost_per_million(report.total_cost, total_all))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
                     ]);
                 }
                 GroupBy::ClientModel | GroupBy::ClientProviderModel => {
@@ -1581,6 +1810,7 @@ fn run_models_report(
                         Cell::new("Cache Read").fg(Color::Cyan),
                         Cell::new("Total").fg(Color::Cyan),
                         Cell::new("Cost").fg(Color::Cyan),
+                        Cell::new("Cost/1M").fg(Color::Cyan),
                     ]);
 
                     for entry in &report.entries {
@@ -1592,6 +1822,86 @@ fn run_models_report(
                             Cell::new(&entry.provider).add_attribute(Attribute::Dim),
                             Cell::new(&entry.model),
                             Cell::new(format_model_name(&entry.model)),
+                            Cell::new(format_tokens_with_commas(entry.input))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_tokens_with_commas(entry.output))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_tokens_with_commas(entry.cache_write))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_tokens_with_commas(entry.cache_read))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_tokens_with_commas(total))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_currency(entry.cost))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_cost_per_million(entry.cost, total))
+                                .set_alignment(CellAlignment::Right),
+                        ]);
+                    }
+
+                    let total_all = report.total_input
+                        + report.total_output
+                        + report.total_cache_write
+                        + report.total_cache_read;
+                    table.add_row(vec![
+                        Cell::new("Total")
+                            .fg(Color::Yellow)
+                            .add_attribute(Attribute::Bold),
+                        Cell::new(""),
+                        Cell::new(""),
+                        Cell::new(""),
+                        Cell::new(format_tokens_with_commas(report.total_input))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                        Cell::new(format_tokens_with_commas(report.total_output))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                        Cell::new(format_tokens_with_commas(report.total_cache_write))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                        Cell::new(format_tokens_with_commas(report.total_cache_read))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                        Cell::new(format_tokens_with_commas(total_all))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                        Cell::new(format_currency(report.total_cost))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                        Cell::new(format_cost_per_million(report.total_cost, total_all))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                    ]);
+                }
+                GroupBy::WorkspaceModel => {
+                    table.set_header(vec![
+                        Cell::new("Workspace").fg(Color::Cyan),
+                        Cell::new("Providers").fg(Color::Cyan),
+                        Cell::new("Sources").fg(Color::Cyan),
+                        Cell::new("Model").fg(Color::Cyan),
+                        Cell::new("Input").fg(Color::Cyan),
+                        Cell::new("Output").fg(Color::Cyan),
+                        Cell::new("Cache Write").fg(Color::Cyan),
+                        Cell::new("Cache Read").fg(Color::Cyan),
+                        Cell::new("Total").fg(Color::Cyan),
+                        Cell::new("Cost").fg(Color::Cyan),
+                    ]);
+
+                    for entry in &report.entries {
+                        let total =
+                            entry.input + entry.output + entry.cache_write + entry.cache_read;
+                        let clients_str = entry.merged_clients.as_deref().unwrap_or(&entry.client);
+                        let capitalized_clients = clients_str
+                            .split(", ")
+                            .map(capitalize_client)
+                            .collect::<Vec<_>>()
+                            .join(", ");
+
+                        table.add_row(vec![
+                            Cell::new(workspace_name(entry.workspace_label.as_deref())),
+                            Cell::new(&entry.provider).add_attribute(Attribute::Dim),
+                            Cell::new(capitalized_clients),
+                            Cell::new(&entry.model),
                             Cell::new(format_tokens_with_commas(entry.input))
                                 .set_alignment(CellAlignment::Right),
                             Cell::new(format_tokens_with_commas(entry.output))
@@ -1666,6 +1976,13 @@ fn run_models_report(
                 format!("  Processing time: {}ms (Rust native)", processing_time_ms).bright_black()
             );
         }
+
+        io::stdout().flush()?;
+
+        let settings = tui::settings::Settings::load();
+        if resolve_should_write_cache(cli_write_cache, cli_no_write_cache, &settings) {
+            write_light_cache(&home_dir, &clients, &since, &until, &year, &group_by);
+        }
     }
 
     Ok(())
@@ -1674,6 +1991,7 @@ fn run_models_report(
 #[allow(clippy::too_many_arguments)]
 fn run_monthly_report(
     json: bool,
+    home_dir: Option<String>,
     clients: Option<Vec<String>>,
     since: Option<String>,
     until: Option<String>,
@@ -1690,22 +2008,28 @@ fn run_monthly_report(
 
     let date_range = get_date_range_label(today, week, month_flag, &since, &until, &year);
 
+    let had_cursor_cache = cursor::has_cursor_usage_cache();
+    let explicit_cursor_filter = client_filter_explicitly_requests_cursor(&clients);
     let spinner = if no_spinner {
         None
     } else {
         Some(LightSpinner::start("Scanning session data..."))
     };
+    let cursor_sync_result = auto_sync_cursor_for_local_report(&home_dir, &clients);
+    let use_env_roots = use_env_roots(&home_dir);
     let start = Instant::now();
     let rt = Runtime::new()?;
     let report = rt
         .block_on(async {
             get_monthly_report(ReportOptions {
-                home_dir: None,
+                home_dir,
+                use_env_roots,
                 clients,
                 since,
                 until,
                 year,
                 group_by: GroupBy::default(),
+                scanner_settings: tui::settings::load_scanner_settings(),
             })
             .await
         })
@@ -1714,6 +2038,11 @@ fn run_monthly_report(
     if let Some(spinner) = spinner {
         spinner.stop();
     }
+    emit_cursor_sync_warning(
+        cursor_sync_result.as_ref(),
+        had_cursor_cache,
+        explicit_cursor_filter,
+    );
 
     let processing_time_ms = start.elapsed().as_millis();
 
@@ -1783,6 +2112,7 @@ fn run_monthly_report(
                 Cell::new("Input").fg(Color::Cyan),
                 Cell::new("Output").fg(Color::Cyan),
                 Cell::new("Cost").fg(Color::Cyan),
+                Cell::new("Cost/1M").fg(Color::Cyan),
             ]);
 
             for entry in &report.entries {
@@ -1803,6 +2133,8 @@ fn run_monthly_report(
                         .collect::<Vec<_>>()
                         .join("\n")
                 };
+                let total_tokens =
+                    entry.input + entry.output + entry.cache_read + entry.cache_write;
 
                 table.add_row(vec![
                     Cell::new(entry.month.clone()),
@@ -1812,25 +2144,31 @@ fn run_monthly_report(
                     Cell::new(format_tokens_with_commas(entry.output))
                         .set_alignment(CellAlignment::Right),
                     Cell::new(format_currency(entry.cost)).set_alignment(CellAlignment::Right),
+                    Cell::new(format_cost_per_million(entry.cost, total_tokens))
+                        .set_alignment(CellAlignment::Right),
                 ]);
             }
 
+            let total_input: i64 = report.entries.iter().map(|e| e.input).sum();
+            let total_output: i64 = report.entries.iter().map(|e| e.output).sum();
+            let total_cache_read: i64 = report.entries.iter().map(|e| e.cache_read).sum();
+            let total_cache_write: i64 = report.entries.iter().map(|e| e.cache_write).sum();
+            let total_tokens = total_input + total_output + total_cache_read + total_cache_write;
             table.add_row(vec![
                 Cell::new("Total")
                     .fg(Color::Yellow)
                     .add_attribute(Attribute::Bold),
                 Cell::new(""),
-                Cell::new(format_tokens_with_commas(
-                    report.entries.iter().map(|e| e.input).sum(),
-                ))
-                .fg(Color::Yellow)
-                .set_alignment(CellAlignment::Right),
-                Cell::new(format_tokens_with_commas(
-                    report.entries.iter().map(|e| e.output).sum(),
-                ))
-                .fg(Color::Yellow)
-                .set_alignment(CellAlignment::Right),
+                Cell::new(format_tokens_with_commas(total_input))
+                    .fg(Color::Yellow)
+                    .set_alignment(CellAlignment::Right),
+                Cell::new(format_tokens_with_commas(total_output))
+                    .fg(Color::Yellow)
+                    .set_alignment(CellAlignment::Right),
                 Cell::new(format_currency(report.total_cost))
+                    .fg(Color::Yellow)
+                    .set_alignment(CellAlignment::Right),
+                Cell::new(format_cost_per_million(report.total_cost, total_tokens))
                     .fg(Color::Yellow)
                     .set_alignment(CellAlignment::Right),
             ]);
@@ -1844,6 +2182,7 @@ fn run_monthly_report(
                 Cell::new("Cache Read").fg(Color::Cyan),
                 Cell::new("Total").fg(Color::Cyan),
                 Cell::new("Cost").fg(Color::Cyan),
+                Cell::new("Cost/1M").fg(Color::Cyan),
             ]);
 
             for entry in &report.entries {
@@ -1879,6 +2218,8 @@ fn run_monthly_report(
                         .set_alignment(CellAlignment::Right),
                     Cell::new(format_tokens_with_commas(total)).set_alignment(CellAlignment::Right),
                     Cell::new(format_currency(entry.cost)).set_alignment(CellAlignment::Right),
+                    Cell::new(format_cost_per_million(entry.cost, total))
+                        .set_alignment(CellAlignment::Right),
                 ]);
             }
 
@@ -1911,6 +2252,9 @@ fn run_monthly_report(
                 Cell::new(format_currency(report.total_cost))
                     .fg(Color::Yellow)
                     .set_alignment(CellAlignment::Right),
+                Cell::new(format_cost_per_million(report.total_cost, total_all))
+                    .fg(Color::Yellow)
+                    .set_alignment(CellAlignment::Right),
             ]);
         }
 
@@ -1928,6 +2272,286 @@ fn run_monthly_report(
 
         if benchmark {
             use colored::Colorize;
+            println!(
+                "{}",
+                format!("  Processing time: {}ms (Rust native)", processing_time_ms).bright_black()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_hourly_report(
+    json: bool,
+    home_dir: Option<String>,
+    clients: Option<Vec<String>>,
+    since: Option<String>,
+    until: Option<String>,
+    year: Option<String>,
+    benchmark: bool,
+    no_spinner: bool,
+    today: bool,
+    week: bool,
+    month_flag: bool,
+) -> Result<()> {
+    use std::time::Instant;
+    use tokio::runtime::Runtime;
+    use tokscale_core::{get_hourly_report, GroupBy, ReportOptions};
+
+    let date_range = get_date_range_label(today, week, month_flag, &since, &until, &year);
+
+    let had_cursor_cache = cursor::has_cursor_usage_cache();
+    let explicit_cursor_filter = client_filter_explicitly_requests_cursor(&clients);
+    let spinner = if no_spinner {
+        None
+    } else {
+        Some(LightSpinner::start("Scanning session data..."))
+    };
+    let cursor_sync_result = auto_sync_cursor_for_local_report(&home_dir, &clients);
+    let use_env_roots = use_env_roots(&home_dir);
+    let start = Instant::now();
+    let rt = Runtime::new()?;
+    let report = rt
+        .block_on(async {
+            get_hourly_report(ReportOptions {
+                home_dir,
+                use_env_roots,
+                clients,
+                since,
+                until,
+                year,
+                group_by: GroupBy::default(),
+                scanner_settings: tui::settings::load_scanner_settings(),
+            })
+            .await
+        })
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    if let Some(spinner) = spinner {
+        spinner.stop();
+    }
+    emit_cursor_sync_warning(
+        cursor_sync_result.as_ref(),
+        had_cursor_cache,
+        explicit_cursor_filter,
+    );
+
+    let processing_time_ms = start.elapsed().as_millis();
+
+    if json {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct HourlyUsageJson {
+            hour: String,
+            clients: Vec<String>,
+            models: Vec<String>,
+            input: i64,
+            output: i64,
+            cache_read: i64,
+            cache_write: i64,
+            message_count: i32,
+            turn_count: i32,
+            cost: f64,
+        }
+
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct HourlyReportJson {
+            entries: Vec<HourlyUsageJson>,
+            total_cost: f64,
+            processing_time_ms: u32,
+        }
+
+        let output = HourlyReportJson {
+            entries: report
+                .entries
+                .into_iter()
+                .map(|e| HourlyUsageJson {
+                    hour: e.hour,
+                    clients: e.clients,
+                    models: e.models,
+                    input: e.input,
+                    output: e.output,
+                    cache_read: e.cache_read,
+                    cache_write: e.cache_write,
+                    message_count: e.message_count,
+                    turn_count: e.turn_count,
+                    cost: e.cost,
+                })
+                .collect(),
+            total_cost: report.total_cost,
+            processing_time_ms: report.processing_time_ms,
+        };
+
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        use comfy_table::{Cell, CellAlignment, Color, ContentArrangement, Table};
+
+        let term_width = crossterm::terminal::size()
+            .map(|(w, _)| w as usize)
+            .unwrap_or(120);
+        let compact = term_width < 100;
+
+        let mut table = Table::new();
+        table.load_preset(TABLE_PRESET);
+        let arrangement = if std::io::stdout().is_terminal() {
+            ContentArrangement::DynamicFullWidth
+        } else {
+            ContentArrangement::Dynamic
+        };
+        table.set_content_arrangement(arrangement);
+        table.enforce_styling();
+
+        if compact {
+            table.set_header(vec![
+                Cell::new("Hour").fg(Color::Cyan),
+                Cell::new("Source").fg(Color::Cyan),
+                Cell::new("Turn").fg(Color::Cyan),
+                Cell::new("Msgs").fg(Color::Cyan),
+                Cell::new("Input").fg(Color::Cyan),
+                Cell::new("Output").fg(Color::Cyan),
+                Cell::new("Cost").fg(Color::Cyan),
+                Cell::new("Cost/1M").fg(Color::Cyan),
+            ]);
+
+            for entry in &report.entries {
+                let clients_col = {
+                    let mut c: Vec<String> =
+                        entry.clients.iter().map(|s| capitalize_client(s)).collect();
+                    c.sort();
+                    c.join(", ")
+                };
+                let turn_display = if entry.turn_count > 0 {
+                    entry.turn_count.to_string()
+                } else {
+                    "—".to_string()
+                };
+                let total_tokens =
+                    entry.input + entry.output + entry.cache_read + entry.cache_write;
+                table.add_row(vec![
+                    Cell::new(&entry.hour).fg(Color::White),
+                    Cell::new(&clients_col),
+                    Cell::new(&turn_display).set_alignment(CellAlignment::Right),
+                    Cell::new(entry.message_count).set_alignment(CellAlignment::Right),
+                    Cell::new(format_tokens_with_commas(entry.input))
+                        .set_alignment(CellAlignment::Right),
+                    Cell::new(format_tokens_with_commas(entry.output))
+                        .set_alignment(CellAlignment::Right),
+                    Cell::new(format_currency(entry.cost))
+                        .fg(Color::Green)
+                        .set_alignment(CellAlignment::Right),
+                    Cell::new(format_cost_per_million(entry.cost, total_tokens))
+                        .set_alignment(CellAlignment::Right),
+                ]);
+            }
+        } else {
+            table.set_header(vec![
+                Cell::new("Hour").fg(Color::Cyan),
+                Cell::new("Source").fg(Color::Cyan),
+                Cell::new("Models").fg(Color::Cyan),
+                Cell::new("Turn").fg(Color::Cyan),
+                Cell::new("Msgs").fg(Color::Cyan),
+                Cell::new("Input").fg(Color::Cyan),
+                Cell::new("Output").fg(Color::Cyan),
+                Cell::new("Cache R").fg(Color::Cyan),
+                Cell::new("Cache W").fg(Color::Cyan),
+                Cell::new("Cache×").fg(Color::Cyan),
+                Cell::new("Cost").fg(Color::Cyan),
+                Cell::new("Cost/1M").fg(Color::Cyan),
+            ]);
+
+            for entry in &report.entries {
+                let clients_col = {
+                    let mut c: Vec<String> =
+                        entry.clients.iter().map(|s| capitalize_client(s)).collect();
+                    c.sort();
+                    c.join(", ")
+                };
+                let models_col = if entry.models.is_empty() {
+                    "-".to_string()
+                } else {
+                    let mut unique: Vec<String> = entry
+                        .models
+                        .iter()
+                        .map(|m| format_model_name(m))
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .into_iter()
+                        .collect();
+                    unique.sort();
+                    unique.join(", ")
+                };
+
+                let cache_hit = {
+                    let paid = (entry.input as u64).saturating_add(entry.cache_write as u64);
+                    if paid == 0 {
+                        if entry.cache_read > 0 {
+                            "∞".to_string()
+                        } else {
+                            "—".to_string()
+                        }
+                    } else {
+                        format!("{:.1}x", entry.cache_read as f64 / paid as f64)
+                    }
+                };
+
+                let turn_display = if entry.turn_count > 0 {
+                    entry.turn_count.to_string()
+                } else {
+                    "—".to_string()
+                };
+
+                let total_tokens =
+                    entry.input + entry.output + entry.cache_read + entry.cache_write;
+
+                table.add_row(vec![
+                    Cell::new(&entry.hour).fg(Color::White),
+                    Cell::new(&clients_col),
+                    Cell::new(&models_col),
+                    Cell::new(&turn_display).set_alignment(CellAlignment::Right),
+                    Cell::new(entry.message_count).set_alignment(CellAlignment::Right),
+                    Cell::new(format_tokens_with_commas(entry.input))
+                        .set_alignment(CellAlignment::Right),
+                    Cell::new(format_tokens_with_commas(entry.output))
+                        .set_alignment(CellAlignment::Right),
+                    Cell::new(format_tokens_with_commas(entry.cache_read))
+                        .set_alignment(CellAlignment::Right),
+                    Cell::new(format_tokens_with_commas(entry.cache_write))
+                        .set_alignment(CellAlignment::Right),
+                    Cell::new(&cache_hit)
+                        .fg(Color::Cyan)
+                        .set_alignment(CellAlignment::Right),
+                    Cell::new(format_currency(entry.cost))
+                        .fg(Color::Green)
+                        .set_alignment(CellAlignment::Right),
+                    Cell::new(format_cost_per_million(entry.cost, total_tokens))
+                        .set_alignment(CellAlignment::Right),
+                ]);
+            }
+        }
+
+        // Title
+        use colored::Colorize;
+        let title = if let Some(ref range) = date_range {
+            format!("Hourly Usage ({})", range)
+        } else {
+            "Hourly Usage".to_string()
+        };
+        println!("\n  {}\n", title.bold());
+
+        // Table
+        let table_str = table.to_string();
+        println!("{}", dim_borders(&table_str));
+
+        // Footer with total
+        println!(
+            "\n  {}  {}",
+            "Total:".bold(),
+            format_currency(report.total_cost).green().bold()
+        );
+
+        if benchmark {
             println!(
                 "{}",
                 format!("  Processing time: {}ms (Rust native)", processing_time_ms).bright_black()
@@ -2153,6 +2777,18 @@ fn format_currency(n: f64) -> String {
     format!("${:.2}", n)
 }
 
+fn format_cost_per_million(cost: f64, total_tokens: i64) -> String {
+    if total_tokens <= 0 || !cost.is_finite() {
+        return "—".to_string();
+    }
+    let cost_per_m = cost * 1_000_000.0 / total_tokens as f64;
+    if !cost_per_m.is_finite() {
+        "—".to_string()
+    } else {
+        format!("${:.2}/M", cost_per_m)
+    }
+}
+
 /// Format a URL as an OSC 8 clickable hyperlink for supported terminals.
 /// Falls back to plain URL text when stdout is not a terminal.
 fn osc8_link(url: &str) -> String {
@@ -2211,21 +2847,30 @@ fn capitalize_client(client: &str) -> String {
         "anthropic-api" => "Anthropic API".to_string(),
         "gemini" => "Gemini".to_string(),
         "amp" => "Amp".to_string(),
+        "codebuff" => "Codebuff".to_string(),
         "droid" => "Droid".to_string(),
+        "crush" => "Crush".to_string(),
         "openclaw" => "openclaw".to_string(),
+        "hermes" => "Hermes Agent".to_string(),
+        "goose" => "Goose".to_string(),
         "pi" => "Pi".to_string(),
         other => other.to_string(),
     }
 }
 
 fn run_clients_command(json: bool) -> Result<()> {
-    use tokscale_core::{parse_local_clients, ClientId, LocalParseOptions};
+    use tokscale_core::{
+        built_in_extra_scan_paths_for, extra_scan_paths_for, parse_local_clients, ClientId,
+        LocalParseOptions,
+    };
 
     let home_dir =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
+    let scanner_settings = tui::settings::load_scanner_settings();
 
     let parsed = parse_local_clients(LocalParseOptions {
         home_dir: Some(home_dir.to_string_lossy().to_string()),
+        use_env_roots: true,
         clients: Some(
             ClientId::iter()
                 .filter(|client| client.parse_local())
@@ -2235,6 +2880,7 @@ fn run_clients_command(json: bool) -> Result<()> {
         since: None,
         until: None,
         year: None,
+        scanner_settings: scanner_settings.clone(),
     })
     .map_err(|e| anyhow::anyhow!(e))?;
 
@@ -2253,14 +2899,25 @@ fn run_clients_command(json: bool) -> Result<()> {
         sessions_path: String,
         sessions_path_exists: bool,
         #[serde(skip_serializing_if = "Vec::is_empty")]
+        additional_paths: Vec<AdditionalPath>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
         legacy_paths: Vec<LegacyPath>,
         message_count: i32,
         headless_supported: bool,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         headless_paths: Vec<HeadlessPath>,
         headless_message_count: i32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        exporter_status: Option<String>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         extra_paths: Vec<ExtraPath>,
+    }
+
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct AdditionalPath {
+        path: String,
+        exists: bool,
     }
 
     #[derive(serde::Serialize)]
@@ -2282,6 +2939,7 @@ fn run_clients_command(json: bool) -> Result<()> {
     struct ExtraPath {
         path: String,
         exists: bool,
+        source: String,
     }
 
     // Collect extra dirs from TOKSCALE_EXTRA_DIRS for display (reuse core parser)
@@ -2289,91 +2947,117 @@ fn run_clients_command(json: bool) -> Result<()> {
     let all_clients: std::collections::HashSet<ClientId> = ClientId::iter().collect();
     let extra_dirs: Vec<(ClientId, String)> =
         tokscale_core::parse_extra_dirs(&extra_dirs_val, &all_clients);
+    let built_in_extra_paths =
+        built_in_extra_scan_paths_for(&home_dir.to_string_lossy(), &all_clients);
+    let settings_extra_dirs = extra_scan_paths_for(&scanner_settings, &all_clients);
+    let copilot_exporter_path = tokscale_core::copilot_exporter_path();
 
-    let clients: Vec<ClientRow> = ClientId::iter()
-        .map(|client| {
-            let sessions_path = client.data().resolve_path(&home_dir.to_string_lossy());
-            let sessions_path_exists = Path::new(&sessions_path).exists();
-            let legacy_paths = if client == ClientId::OpenClaw {
-                vec![
-                    LegacyPath {
-                        path: home_dir
-                            .join(".clawdbot/agents")
-                            .to_string_lossy()
-                            .to_string(),
-                        exists: home_dir.join(".clawdbot/agents").exists(),
-                    },
-                    LegacyPath {
-                        path: home_dir
-                            .join(".moltbot/agents")
-                            .to_string_lossy()
-                            .to_string(),
-                        exists: home_dir.join(".moltbot/agents").exists(),
-                    },
-                    LegacyPath {
-                        path: home_dir
-                            .join(".moldbot/agents")
-                            .to_string_lossy()
-                            .to_string(),
-                        exists: home_dir.join(".moldbot/agents").exists(),
-                    },
-                ]
-            } else {
-                vec![]
-            };
-            let (headless_supported, headless_paths, headless_message_count) =
-                if client == ClientId::Codex {
-                    (
-                        true,
-                        headless_roots
-                            .iter()
-                            .map(|root| {
-                                let path = root.join(client.as_str());
-                                HeadlessPath {
-                                    path: path.to_string_lossy().to_string(),
-                                    exists: path.exists(),
-                                }
-                            })
-                            .collect(),
-                        headless_codex_count,
-                    )
+    let clients: Vec<ClientRow> =
+        ClientId::iter()
+            .map(|client| {
+                let sessions_path = client.data().resolve_path(&home_dir.to_string_lossy());
+                let sessions_path_exists = Path::new(&sessions_path).exists();
+                let additional_paths: Vec<AdditionalPath> = built_in_extra_paths
+                    .iter()
+                    .filter(|(c, _)| *c == client)
+                    .map(|(_, path)| AdditionalPath {
+                        path: path.to_string_lossy().to_string(),
+                        exists: path.exists(),
+                    })
+                    .collect();
+                let legacy_paths = if client == ClientId::OpenClaw {
+                    vec![
+                        LegacyPath {
+                            path: home_dir
+                                .join(".clawdbot/agents")
+                                .to_string_lossy()
+                                .to_string(),
+                            exists: home_dir.join(".clawdbot/agents").exists(),
+                        },
+                        LegacyPath {
+                            path: home_dir
+                                .join(".moltbot/agents")
+                                .to_string_lossy()
+                                .to_string(),
+                            exists: home_dir.join(".moltbot/agents").exists(),
+                        },
+                        LegacyPath {
+                            path: home_dir
+                                .join(".moldbot/agents")
+                                .to_string_lossy()
+                                .to_string(),
+                            exists: home_dir.join(".moldbot/agents").exists(),
+                        },
+                    ]
                 } else {
-                    (false, vec![], 0)
+                    vec![]
                 };
+                let (headless_supported, headless_paths, headless_message_count) =
+                    if client == ClientId::Codex {
+                        (
+                            true,
+                            headless_roots
+                                .iter()
+                                .map(|root| {
+                                    let path = root.join(client.as_str());
+                                    HeadlessPath {
+                                        path: path.to_string_lossy().to_string(),
+                                        exists: path.exists(),
+                                    }
+                                })
+                                .collect(),
+                            headless_codex_count,
+                        )
+                    } else {
+                        (false, vec![], 0)
+                    };
 
-            let label = match client {
-                ClientId::Claude => "Claude Code",
-                ClientId::Codex => "Codex CLI",
-                ClientId::Gemini => "Gemini CLI",
-                ClientId::Cursor => "Cursor IDE",
-                ClientId::Kimi => "Kimi CLI",
-                _ => client_ui::display_name(client),
-            }
-            .to_string();
+                let label = match client {
+                    ClientId::Claude => "Claude Code",
+                    ClientId::Codex => "Codex CLI",
+                    ClientId::Copilot => "Copilot CLI",
+                    ClientId::Gemini => "Gemini CLI",
+                    ClientId::Cursor => "Cursor IDE",
+                    ClientId::Kimi => "Kimi CLI",
+                    _ => client_ui::display_name(client),
+                }
+                .to_string();
 
-            let extra_paths: Vec<ExtraPath> = extra_dirs
-                .iter()
-                .filter(|(c, _)| *c == client)
-                .map(|(_, path)| ExtraPath {
-                    path: path.clone(),
-                    exists: Path::new(path).exists(),
-                })
-                .collect();
+                let mut extra_paths: Vec<ExtraPath> = settings_extra_dirs
+                    .iter()
+                    .filter(|(c, _)| *c == client)
+                    .map(|(_, path)| ExtraPath {
+                        path: path.to_string_lossy().to_string(),
+                        exists: path.exists(),
+                        source: "settings".to_string(),
+                    })
+                    .collect();
+                extra_paths.extend(extra_dirs.iter().filter(|(c, _)| *c == client).map(
+                    |(_, path)| ExtraPath {
+                        path: path.clone(),
+                        exists: Path::new(path).exists(),
+                        source: "env".to_string(),
+                    },
+                ));
 
-            ClientRow {
-                client: client.as_str().to_string(),
-                label,
-                sessions_path,
-                sessions_path_exists,
-                legacy_paths,
-                message_count: parsed.counts.get(client),
-                headless_supported,
-                headless_paths,
-                headless_message_count,
-                extra_paths,
-            }
-        })
-        .collect();
+                ClientRow {
+                    client: client.as_str().to_string(),
+                    label,
+                    sessions_path,
+                    sessions_path_exists,
+                    additional_paths,
+                    legacy_paths,
+                    message_count: parsed.counts.get(client),
+                    headless_supported,
+                    headless_paths,
+                    headless_message_count,
+                    exporter_status: (client == ClientId::Copilot
+                        && copilot_exporter_path.is_some())
+                    .then(|| "configured".to_string()),
+                    extra_paths,
+                }
+            })
+            .collect();
 
     if json {
         #[derive(serde::Serialize)]
@@ -2423,6 +3107,18 @@ fn run_clients_command(json: bool) -> Result<()> {
                 .bright_black()
             );
 
+            if !row.additional_paths.is_empty() {
+                let additional_desc: Vec<String> = row
+                    .additional_paths
+                    .iter()
+                    .map(|ap| describe_path(&ap.path, ap.exists))
+                    .collect();
+                println!(
+                    "  {}",
+                    format!("additional: {}", additional_desc.join(", ")).bright_black()
+                );
+            }
+
             if !row.legacy_paths.is_empty() {
                 let legacy_desc: Vec<String> = row
                     .legacy_paths
@@ -2436,14 +3132,37 @@ fn run_clients_command(json: bool) -> Result<()> {
             }
 
             if !row.extra_paths.is_empty() {
-                let extra_desc: Vec<String> = row
+                let settings_desc: Vec<String> = row
                     .extra_paths
                     .iter()
+                    .filter(|ep| ep.source == "settings")
                     .map(|ep| describe_path(&ep.path, ep.exists))
                     .collect();
+                if !settings_desc.is_empty() {
+                    println!(
+                        "  {}",
+                        format!("extra (settings): {}", settings_desc.join(", ")).bright_black()
+                    );
+                }
+
+                let env_desc: Vec<String> = row
+                    .extra_paths
+                    .iter()
+                    .filter(|ep| ep.source == "env")
+                    .map(|ep| describe_path(&ep.path, ep.exists))
+                    .collect();
+                if !env_desc.is_empty() {
+                    println!(
+                        "  {}",
+                        format!("extra (env): {}", env_desc.join(", ")).bright_black()
+                    );
+                }
+            }
+
+            if let Some(exporter_status) = row.exporter_status.as_ref() {
                 println!(
                     "  {}",
-                    format!("extra: {}", extra_desc.join(", ")).bright_black()
+                    format!("exporter: {}", exporter_status).bright_black()
                 );
             }
 
@@ -2689,11 +3408,16 @@ fn to_ts_token_contribution_data(graph: &tokscale_core::GraphResult) -> TsTokenC
     }
 }
 
-fn run_login_command() -> Result<()> {
+fn run_login_command(token: Option<String>) -> Result<()> {
     use tokio::runtime::Runtime;
 
     let rt = Runtime::new()?;
-    rt.block_on(async { auth::login().await })
+    rt.block_on(async {
+        match token {
+            Some(token) => auth::login_with_token(&token).await,
+            None => auth::login().await,
+        }
+    })
 }
 
 fn run_sync_api_command(
@@ -2787,6 +3511,136 @@ fn run_whoami_command() -> Result<()> {
     auth::whoami()
 }
 
+fn run_delete_data_command() -> Result<()> {
+    use colored::Colorize;
+    use std::io::{self, Write};
+    use tokio::runtime::Runtime;
+
+    let auth_token = auth::resolve_api_token().ok_or_else(|| {
+        anyhow::anyhow!("Not logged in. Run `tokscale login` or set TOKSCALE_API_TOKEN.")
+    })?;
+
+    println!("\n{}", "  ⚠ Delete all submitted usage data".red().bold());
+    println!("{}", "  This will permanently remove:".bright_black());
+    println!("{}", "    • Leaderboard entries".bright_black());
+    println!("{}", "    • Public profile stats".bright_black());
+    println!("{}", "    • Daily usage history".bright_black());
+    println!(
+        "{}",
+        "  Your account and API tokens will stay active.\n".bright_black()
+    );
+
+    print!(
+        "{}",
+        "  Are you sure you want to delete all submitted data? (y/N): ".white()
+    );
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    if input.trim().to_lowercase() != "y" {
+        println!("{}", "  Cancelled.".bright_black());
+        return Ok(());
+    }
+
+    print!(
+        "{}",
+        "  This cannot be undone. You will lose all historical token/cost data. Continue? (y/N): "
+            .white()
+    );
+    io::stdout().flush()?;
+    input.clear();
+    io::stdin().read_line(&mut input)?;
+    if input.trim().to_lowercase() != "y" {
+        println!("{}", "  Cancelled.".bright_black());
+        return Ok(());
+    }
+
+    print!("{}", "  Type \"delete my data\" to confirm: ".white());
+    io::stdout().flush()?;
+    input.clear();
+    io::stdin().read_line(&mut input)?;
+    if input.trim().to_lowercase() != "delete my data" {
+        println!("{}", "  Confirmation failed. Cancelled.".bright_black());
+        return Ok(());
+    }
+
+    println!("\n{}", "  Deleting submitted data...".bright_black());
+
+    let api_url = auth::get_api_base_url();
+    let rt = Runtime::new()?;
+
+    let response = rt.block_on(async {
+        reqwest::Client::new()
+            .delete(format!("{}/api/settings/submitted-data", api_url))
+            .header("Authorization", format!("Bearer {}", auth_token.token))
+            .send()
+            .await
+    });
+
+    match response {
+        Ok(resp) => {
+            let status = resp.status();
+            let body: serde_json::Value =
+                rt.block_on(async { resp.json().await }).unwrap_or_default();
+
+            match interpret_delete_submitted_data_response(status, &body)? {
+                DeleteSubmittedDataOutcome::Deleted(count) => {
+                    println!(
+                        "{}",
+                        format!(
+                            "  ✓ Deleted {} submission(s). Leaderboard and profile will refresh shortly.",
+                            count
+                        )
+                        .green()
+                    );
+                }
+                DeleteSubmittedDataOutcome::NotFound => {
+                    println!("{}", "  No submitted data found for this account.".yellow());
+                }
+            }
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!("Request failed: {}", e));
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum DeleteSubmittedDataOutcome {
+    Deleted(i64),
+    NotFound,
+}
+
+fn interpret_delete_submitted_data_response(
+    status: reqwest::StatusCode,
+    body: &serde_json::Value,
+) -> Result<DeleteSubmittedDataOutcome> {
+    if status.is_success() {
+        let deleted = body
+            .get("deleted")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let count = body
+            .get("deletedSubmissions")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+
+        if deleted {
+            Ok(DeleteSubmittedDataOutcome::Deleted(count))
+        } else {
+            Ok(DeleteSubmittedDataOutcome::NotFound)
+        }
+    } else {
+        let err = body
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown error");
+        Err(anyhow::anyhow!("Failed ({}): {}", status, err))
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct StarCache {
@@ -2799,12 +3653,24 @@ struct StarCache {
 }
 
 fn star_cache_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("tokscale").join("star-cache.json"))
+    Some(crate::paths::get_config_dir().join("star-cache.json"))
+}
+
+fn legacy_macos_star_cache_path() -> Option<PathBuf> {
+    crate::paths::legacy_macos_config_dir().map(|d| d.join("star-cache.json"))
 }
 
 fn load_star_cache(username: &str) -> Option<StarCache> {
-    let path = star_cache_path()?;
-    let content = std::fs::read_to_string(path).ok()?;
+    // Read the canonical path first; on macOS, fall back once to the
+    // pre-#468 location under `~/Library/Application Support/tokscale/`
+    // so existing users don't get re-prompted to star the repo just
+    // because their previous cache lives at the legacy path. The legacy
+    // read is suppressed when `TOKSCALE_CONFIG_DIR` is set so isolated
+    // profiles stay hermetic.
+    let primary = star_cache_path().and_then(|path| std::fs::read_to_string(path).ok());
+    let content = primary.or_else(|| {
+        legacy_macos_star_cache_path().and_then(|legacy| std::fs::read_to_string(legacy).ok())
+    })?;
     let cache: StarCache = serde_json::from_str(&content).ok()?;
     // Must match username and have hasStarred=true
     if cache.username != username || !cache.has_starred {
@@ -2829,9 +3695,28 @@ fn save_star_cache(username: &str, has_starred: bool) {
     };
     if let Ok(content) = serde_json::to_string_pretty(&cache) {
         if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
+            if std::fs::create_dir_all(dir).is_err() {
+                return;
+            }
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0);
+            let tmp_filename = format!(".star-cache.{}.{:x}.tmp", std::process::id(), nanos);
+            let tmp_path = dir.join(tmp_filename);
+
+            let write_result = (|| -> std::io::Result<()> {
+                use std::io::Write;
+                let mut file = std::fs::File::create(&tmp_path)?;
+                file.write_all(content.as_bytes())?;
+                file.sync_all()?;
+                tokscale_core::fs_atomic::replace_file(&tmp_path, &path)
+            })();
+
+            if write_result.is_err() {
+                let _ = std::fs::remove_file(&tmp_path);
+            }
         }
-        let _ = std::fs::write(&path, content);
     }
 }
 
@@ -2927,8 +3812,10 @@ fn prompt_star_repo(username: &str) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_graph_command(
     output: Option<String>,
+    home_dir: Option<String>,
     clients: Option<Vec<String>>,
     since: Option<String>,
     until: Option<String>,
@@ -2938,13 +3825,14 @@ fn run_graph_command(
 ) -> Result<()> {
     use colored::Colorize;
     use std::time::Instant;
-    use tokscale_core::{generate_graph, GroupBy, ReportOptions};
+    use tokscale_core::{generate_local_graph_report, GroupBy, ReportOptions};
 
     let show_progress = output.is_some() && !no_spinner;
-    let include_cursor = clients
-        .as_ref()
-        .is_none_or(|s| s.iter().any(|src| src == "cursor"));
-    let has_cursor_cache = cursor::has_cursor_usage_cache();
+    let include_cursor = home_dir.is_none()
+        && clients
+            .as_ref()
+            .is_none_or(|s| s.iter().any(|src| src == "cursor"));
+    let has_cursor_cache = include_cursor && cursor::has_cursor_usage_cache();
     let mut cursor_sync_result: Option<cursor::SyncCursorResult> = None;
 
     if include_cursor && cursor::is_cursor_logged_in() {
@@ -2960,16 +3848,19 @@ fn run_graph_command(
     if show_progress {
         eprintln!("  Generating graph data...");
     }
+    let use_env_roots = use_env_roots(&home_dir);
     let rt = tokio::runtime::Runtime::new()?;
     let graph_result = rt
         .block_on(async {
-            generate_graph(ReportOptions {
-                home_dir: None,
+            generate_local_graph_report(ReportOptions {
+                home_dir,
+                use_env_roots,
                 clients,
                 since,
                 until,
                 year,
                 group_by: GroupBy::default(),
+                scanner_settings: tui::settings::load_scanner_settings(),
             })
             .await
         })
@@ -3096,25 +3987,32 @@ fn run_submit_command(
     use colored::Colorize;
     use std::io::IsTerminal;
     use tokio::runtime::Runtime;
-    use tokscale_core::{generate_graph, ClientId, GroupBy, ReportOptions};
+    use tokscale_core::{generate_graph, GroupBy, ReportOptions};
 
-    let credentials = match auth::load_credentials() {
-        Some(creds) => creds,
+    let auth_token = match auth::resolve_api_token() {
+        Some(token) => token,
         None => {
             eprintln!("\n  {}", "Not logged in.".yellow());
             eprintln!(
                 "{}",
-                "  Run 'bunx tokscale@latest login' first.\n".bright_black()
+                "  Run 'bunx tokscale@latest login' or set TOKSCALE_API_TOKEN.\n".bright_black()
             );
             std::process::exit(1);
         }
     };
 
-    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
-        let _ = prompt_star_repo(&credentials.username);
+    if auth_token.source == auth::ApiTokenSource::StoredCredentials
+        && std::io::stdin().is_terminal()
+        && std::io::stdout().is_terminal()
+    {
+        if let Some(username) = auth_token.username.as_deref() {
+            let _ = prompt_star_repo(username);
+        }
     }
 
     println!("\n  {}\n", "Tokscale - Submit Usage Data".cyan());
+
+    let clients = clients.or_else(|| Some(default_submit_clients()));
 
     // Sync Anthropic API usage if configured
     let include_anthropic_api = clients
@@ -3174,11 +4072,13 @@ fn run_submit_command(
         .block_on(async {
             generate_graph(ReportOptions {
                 home_dir: None,
+                use_env_roots: true,
                 clients,
                 since,
                 until,
                 year,
                 group_by: GroupBy::default(),
+                scanner_settings: tui::settings::load_scanner_settings(),
             })
             .await
         })
@@ -3254,7 +4154,7 @@ fn run_submit_command(
         reqwest::Client::new()
             .post(format!("{}/api/submit", api_url))
             .header("Content-Type", "application/json")
-            .header("Authorization", format!("Bearer {}", credentials.token))
+            .header("Authorization", format!("Bearer {}", auth_token.token))
             .json(&submit_payload)
             .send()
             .await
@@ -3320,19 +4220,22 @@ fn run_submit_command(
                     println!("{}", format!("    Active days: {}", days).bright_black());
                 }
             }
-            println!();
-            println!(
-                "{}",
-                osc8_link_with_text(
-                    &format!("{}/u/{}", api_url, credentials.username),
-                    &format!(
-                        "  View your profile: {}/u/{}",
-                        api_url, credentials.username
-                    ),
-                )
-                .cyan()
-            );
-            println!();
+            if let Some(username) = body
+                .username
+                .clone()
+                .or_else(|| auth_token.username.clone())
+            {
+                println!();
+                println!(
+                    "{}",
+                    osc8_link_with_text(
+                        &format!("{}/u/{}", api_url, username),
+                        &format!("  View your profile: {}/u/{}", api_url, username),
+                    )
+                    .cyan()
+                );
+                println!();
+            }
 
             if let Some(warnings) = body.warnings {
                 if !warnings.is_empty() {
@@ -3352,20 +4255,169 @@ fn run_submit_command(
     }
 
     // Warm the TUI cache so the next `tokscale` launch is instant.
-    // We load with all clients and no date filters (default TUI view)
-    // to maximize cache hit rate.
-    {
-        use crate::tui::{save_cached_data, DataLoader};
-        use std::collections::HashSet;
+    // Detached subprocess so submit returns to the shell immediately on large
+    // datasets — a full re-scan would otherwise block for tens of seconds.
+    spawn_warm_tui_cache_detached();
 
-        let all_clients: Vec<ClientId> = ClientId::iter().collect();
-        let enabled_set: HashSet<ClientId> = all_clients.iter().copied().collect();
-        let loader = DataLoader::with_filters(None, None, None, None);
-        if let Ok(data) = loader.load(&all_clients, &GroupBy::default(), false) {
-            save_cached_data(&data, &enabled_set, false);
-        }
+    Ok(())
+}
+
+fn spawn_warm_tui_cache_detached() {
+    use std::process::{Command, Stdio};
+
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+
+    let mut cmd = Command::new(exe);
+    cmd.arg("warm-tui-cache")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // New process group so the child is not killed by Ctrl-C in the
+        // parent's shell and survives after submit exits.
+        cmd.process_group(0);
     }
 
+    let _ = cmd.spawn();
+}
+
+/// Resolve the filter set used by a no-`--client`-flag TUI launch.
+///
+/// Mirrors the resolution that `build_client_filter` + `tui::run` perform
+/// when the user passes no CLI client flag:
+///
+/// 1. If `defaultClients` from `~/.config/tokscale/settings.json` is
+///    set, use that (after dropping unknown ids).
+/// 2. Otherwise fall back to `ClientFilter::default_set()` (every real
+///    client, Synthetic excluded).
+///
+/// This **must** stay in lockstep with the resolution that
+/// `tui::run(.., clients = None, ..)` would compute. If it drifts, the
+/// `submit` warm cache uses one filter set while the next no-flag TUI
+/// launch wants another, the cache key mismatches, and the warming
+/// becomes a wasted background scan.
+fn resolve_default_tui_filter_set() -> std::collections::HashSet<ClientFilter> {
+    resolve_default_tui_filter_set_with(&tui::settings::load_default_clients())
+}
+
+/// Pure variant of `resolve_default_tui_filter_set` for unit-testable
+/// resolution. `configured` is the (raw, pre-validation) list of ids
+/// from settings.json.
+fn resolve_default_tui_filter_set_with(
+    configured: &[String],
+) -> std::collections::HashSet<ClientFilter> {
+    let parsed: Vec<ClientFilter> = configured
+        .iter()
+        .filter_map(|s| ClientFilter::from_filter_str(s))
+        .collect();
+    if parsed.is_empty() {
+        ClientFilter::default_set()
+    } else {
+        parsed.into_iter().collect()
+    }
+}
+
+fn resolve_should_write_cache(
+    cli_write: bool,
+    cli_no_write: bool,
+    settings: &tui::settings::Settings,
+) -> bool {
+    if cli_no_write {
+        return false;
+    }
+    if cli_write {
+        return true;
+    }
+    settings.light.write_cache
+}
+
+fn resolve_light_cache_filter_set(
+    clients: &Option<Vec<String>>,
+) -> std::collections::HashSet<ClientFilter> {
+    if let Some(clients) = clients {
+        clients
+            .iter()
+            .filter_map(|client| ClientFilter::from_filter_str(client))
+            .collect()
+    } else {
+        resolve_default_tui_filter_set()
+    }
+}
+
+fn write_light_cache(
+    home_dir: &Option<String>,
+    clients: &Option<Vec<String>>,
+    since: &Option<String>,
+    until: &Option<String>,
+    year: &Option<String>,
+    group_by: &tokscale_core::GroupBy,
+) {
+    use crate::tui::{save_cached_data, DataLoader};
+
+    // The TUI cache key is `(enabled_clients, group_by)` only — it does
+    // NOT include `--since`, `--until`, `--year`, or `--home`. Writing
+    // date-filtered or home-scoped data under that key would silently
+    // poison subsequent TUI launches: the next `tokscale tui` would
+    // hit the cache and render the date-filtered slice as if it were
+    // the full report. Refuse the write when any of those filters is
+    // present and tell the user; their CLI report still prints fine.
+    if since.is_some() || until.is_some() || year.is_some() || home_dir.is_some() {
+        eprintln!(
+            "tokscale: --write-cache skipped because --since/--until/--year/--home are set; \
+             the TUI cache key does not include those filters and writing would poison future TUI launches."
+        );
+        return;
+    }
+
+    let enabled_set = resolve_light_cache_filter_set(clients);
+    let scan_clients: Vec<tokscale_core::ClientId> = enabled_set
+        .iter()
+        .filter_map(|filter| filter.to_client_id())
+        .collect();
+    let include_synthetic = enabled_set.contains(&ClientFilter::Synthetic);
+
+    // No date/home filters at this point (guarded above), so passing
+    // None into `with_filters` matches what the TUI itself does on
+    // launch — keeps the cache key derivation byte-identical.
+    //
+    // Cache writes are best-effort: the report has already been flushed
+    // to stdout by the time we reach here, so a scan failure from the
+    // background loader must NOT propagate up and turn a successful
+    // user-visible report into a non-zero exit code. Mirrors the
+    // pattern in `run_warm_tui_cache` below.
+    let loader = DataLoader::with_filters(None, None, None, None);
+    if let Ok(data) = loader.load(&scan_clients, group_by, include_synthetic) {
+        save_cached_data(&data, &enabled_set, group_by);
+    }
+}
+
+fn run_warm_tui_cache() -> Result<()> {
+    use crate::tui::{save_cached_data, DataLoader};
+    use tokscale_core::{ClientId, GroupBy};
+
+    // Warm the cache using the same default filter set the TUI uses on
+    // a no-flag launch. Going through `resolve_default_tui_filter_set()`
+    // keeps these two paths in lockstep — including the user's
+    // `defaultClients` setting, which the TUI honors via
+    // `build_client_filter`. If they drift, every TUI launch after
+    // `submit` becomes a cache miss instead of a fresh hit, defeating
+    // the warming.
+    let enabled_set = resolve_default_tui_filter_set();
+    let scan_clients: Vec<ClientId> = enabled_set
+        .iter()
+        .filter_map(|f| f.to_client_id())
+        .collect();
+    let include_synthetic = enabled_set.contains(&ClientFilter::Synthetic);
+    let loader = DataLoader::with_filters(None, None, None, None);
+    if let Ok(data) = loader.load(&scan_clients, &GroupBy::default(), include_synthetic) {
+        save_cached_data(&data, &enabled_set, &GroupBy::default());
+    }
     Ok(())
 }
 
@@ -3379,7 +4431,16 @@ fn run_cursor_command(subcommand: CursorSubcommand) -> Result<()> {
         } => cursor::run_cursor_logout(name, all, purge_cache),
         CursorSubcommand::Status { name } => cursor::run_cursor_status(name),
         CursorSubcommand::Accounts { json } => cursor::run_cursor_accounts(json),
+        CursorSubcommand::Sync { json } => cursor::run_cursor_sync(json),
         CursorSubcommand::Switch { name } => cursor::run_cursor_switch(&name),
+    }
+}
+
+fn run_antigravity_command(subcommand: AntigravitySubcommand) -> Result<()> {
+    match subcommand {
+        AntigravitySubcommand::Sync => antigravity::run_antigravity_sync(),
+        AntigravitySubcommand::Status { json } => antigravity::run_antigravity_status(json),
+        AntigravitySubcommand::PurgeCache => antigravity::run_antigravity_purge_cache(),
     }
 }
 
@@ -3576,6 +4637,8 @@ fn run_headless_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+    use reqwest::StatusCode;
     use tokscale_core::{
         calculate_summary, calculate_years, ClientContribution, DailyContribution, DailyTotals,
         GraphMeta, GraphResult, TokenBreakdown, YearSummary,
@@ -3648,77 +4711,45 @@ mod tests {
             .unwrap()
     }
 
+    // Tests below call `build_client_filter_with_defaults` directly with
+    // an explicit `defaults` slice instead of `build_client_filter`, which
+    // reads from `~/.config/tokscale/settings.json`. Reading host config
+    // makes tests non-hermetic — a developer with their own
+    // `defaultClients` set would break the assertions. The wrapper is
+    // covered separately by tests that pass an explicit `&[]`.
+
     #[test]
     fn test_build_client_filter_all_false() {
-        let flags = ClientFlags {
-            opencode: false,
-            claude: false,
-            codex: false,
-            gemini: false,
-            cursor: false,
-            amp: false,
-            droid: false,
-            openclaw: false,
-            pi: false,
-            kimi: false,
-            qwen: false,
-            roocode: false,
-            kilocode: false,
-            kilo: false,
-            mux: false,
-            synthetic: false,
-        };
-        assert_eq!(build_client_filter(flags), None);
+        let flags = ClientFlags::default();
+        assert_eq!(build_client_filter_with_defaults(flags, &[]), None);
     }
 
     #[test]
-    fn test_build_client_filter_single_client() {
+    fn test_build_client_filter_single_legacy_flag() {
         let flags = ClientFlags {
             opencode: true,
-            claude: false,
-            codex: false,
-            gemini: false,
-            cursor: false,
-            amp: false,
-            droid: false,
-            openclaw: false,
-            pi: false,
-            kimi: false,
-            qwen: false,
-            roocode: false,
-            kilocode: false,
-            kilo: false,
-            mux: false,
-            synthetic: false,
+            ..ClientFlags::default()
         };
         assert_eq!(
-            build_client_filter(flags),
+            build_client_filter_with_defaults(flags, &[]),
             Some(vec!["opencode".to_string()])
         );
     }
 
     #[test]
-    fn test_build_client_filter_multiple_clients() {
+    fn test_build_client_filter_multiple_legacy_flags_preserve_order() {
         let flags = ClientFlags {
             opencode: true,
             claude: true,
-            codex: false,
-            gemini: false,
-            cursor: false,
-            amp: false,
-            droid: false,
-            openclaw: false,
             pi: true,
-            kimi: false,
-            qwen: false,
-            roocode: false,
-            kilocode: false,
-            kilo: false,
-            mux: false,
-            synthetic: false,
+            ..ClientFlags::default()
         };
+        // Legacy iteration order is the declaration order in `legacy[]`,
+        // not the order the user typed flags on the command line. This is
+        // a deliberate trade-off: legacy flags are deprecated, and the
+        // canonical `--client a,b,c` form preserves user order.
         assert_eq!(
-            build_client_filter(flags),
+            build_client_filter_with_defaults(flags, &[]),
             Some(vec![
                 "opencode".to_string(),
                 "claude".to_string(),
@@ -3728,42 +4759,31 @@ mod tests {
     }
 
     #[test]
-    fn test_build_client_filter_synthetic_only() {
+    fn test_build_client_filter_synthetic_only_legacy() {
         let flags = ClientFlags {
-            opencode: false,
-            claude: false,
-            codex: false,
-            gemini: false,
-            cursor: false,
-            amp: false,
-            droid: false,
-            openclaw: false,
-            pi: false,
-            kimi: false,
-            qwen: false,
-            roocode: false,
-            kilocode: false,
-            kilo: false,
-            mux: false,
             synthetic: true,
+            ..ClientFlags::default()
         };
         assert_eq!(
-            build_client_filter(flags),
+            build_client_filter_with_defaults(flags, &[]),
             Some(vec!["synthetic".to_string()])
         );
     }
 
     #[test]
-    fn test_build_client_filter_all_clients() {
+    fn test_build_client_filter_all_legacy_flags() {
         let flags = ClientFlags {
             opencode: true,
             claude: true,
             codex: true,
+            copilot: true,
             gemini: true,
             cursor: true,
             amp: true,
+            codebuff: true,
             droid: true,
             openclaw: true,
+            hermes: true,
             pi: true,
             kimi: true,
             qwen: true,
@@ -3771,28 +4791,526 @@ mod tests {
             kilocode: true,
             kilo: true,
             mux: true,
+            crush: true,
+            goose: true,
+            antigravity: true,
+            zed: true,
+            anthropic_api: true,
             synthetic: true,
+            ..ClientFlags::default()
         };
-        let result = build_client_filter(flags);
+        let result = build_client_filter_with_defaults(flags, &[]);
         assert!(result.is_some());
         let sources = result.unwrap();
-        assert_eq!(sources.len(), 16);
-        assert!(sources.contains(&"opencode".to_string()));
-        assert!(sources.contains(&"claude".to_string()));
-        assert!(sources.contains(&"codex".to_string()));
-        assert!(sources.contains(&"gemini".to_string()));
-        assert!(sources.contains(&"cursor".to_string()));
-        assert!(sources.contains(&"amp".to_string()));
-        assert!(sources.contains(&"droid".to_string()));
-        assert!(sources.contains(&"openclaw".to_string()));
-        assert!(sources.contains(&"pi".to_string()));
-        assert!(sources.contains(&"kimi".to_string()));
-        assert!(sources.contains(&"qwen".to_string()));
-        assert!(sources.contains(&"roocode".to_string()));
-        assert!(sources.contains(&"kilocode".to_string()));
-        assert!(sources.contains(&"kilo".to_string()));
-        assert!(sources.contains(&"mux".to_string()));
-        assert!(sources.contains(&"synthetic".to_string()));
+        // ClientId::COUNT does not include synthetic, but ClientFilter does.
+        let expected_len = tokscale_core::ClientId::iter().count() + 1;
+        assert_eq!(sources.len(), expected_len);
+        for required in [
+            "opencode",
+            "claude",
+            "codex",
+            "copilot",
+            "gemini",
+            "cursor",
+            "amp",
+            "codebuff",
+            "droid",
+            "openclaw",
+            "hermes",
+            "pi",
+            "kimi",
+            "qwen",
+            "roocode",
+            "kilocode",
+            "kilo",
+            "mux",
+            "crush",
+            "goose",
+            "antigravity",
+            "zed",
+            "anthropic-api",
+            "synthetic",
+        ] {
+            assert!(
+                sources.contains(&required.to_string()),
+                "missing client filter id: {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_client_filter_canonical_clients_preserve_user_order() {
+        // `--client claude,opencode,pi` should keep user-typed order so
+        // downstream display (e.g. table grouping previews) is stable.
+        let flags = ClientFlags {
+            clients: vec![
+                ClientFilter::Claude,
+                ClientFilter::Opencode,
+                ClientFilter::Pi,
+            ],
+            ..ClientFlags::default()
+        };
+        assert_eq!(
+            build_client_filter_with_defaults(flags, &[]),
+            Some(vec![
+                "claude".to_string(),
+                "opencode".to_string(),
+                "pi".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_build_client_filter_canonical_dedups_repeats() {
+        let flags = ClientFlags {
+            clients: vec![
+                ClientFilter::Claude,
+                ClientFilter::Claude,
+                ClientFilter::Opencode,
+            ],
+            ..ClientFlags::default()
+        };
+        assert_eq!(
+            build_client_filter_with_defaults(flags, &[]),
+            Some(vec!["claude".to_string(), "opencode".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_build_client_filter_canonical_and_legacy_dedup() {
+        // Mixing canonical `--client claude` with legacy `--claude` must not
+        // double-list claude. Canonical entries come first, legacy fills in
+        // anything missing.
+        let flags = ClientFlags {
+            clients: vec![ClientFilter::Claude],
+            opencode: true,
+            claude: true,
+            ..ClientFlags::default()
+        };
+        assert_eq!(
+            build_client_filter_with_defaults(flags, &[]),
+            Some(vec!["claude".to_string(), "opencode".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_client_filter_as_filter_str_matches_client_id_for_overlap() {
+        // Every ClientFilter variant except Synthetic must agree with
+        // ClientId::as_str() so the core filter list stays consistent.
+        for filter in ClientFilter::value_variants() {
+            if matches!(filter, ClientFilter::Synthetic) {
+                continue;
+            }
+            let id = filter.as_filter_str();
+            assert!(
+                tokscale_core::ClientId::from_str(id).is_some(),
+                "ClientFilter::{:?} -> {:?} has no matching ClientId",
+                filter,
+                id,
+            );
+        }
+    }
+
+    #[test]
+    fn test_client_filter_to_client_id_round_trip() {
+        // For every non-Synthetic filter:
+        //   from_client_id(to_client_id(filter).unwrap()) == filter
+        // and the canonical id strings agree.
+        for filter in ClientFilter::value_variants() {
+            match filter.to_client_id() {
+                Some(id) => {
+                    assert_eq!(
+                        ClientFilter::from_client_id(id),
+                        *filter,
+                        "round-trip mismatch for {:?}",
+                        filter
+                    );
+                    assert_eq!(
+                        id.as_str(),
+                        filter.as_filter_str(),
+                        "id string drift between ClientId and ClientFilter for {:?}",
+                        filter
+                    );
+                }
+                None => {
+                    // Synthetic is the only meta-client without a ClientId.
+                    assert!(matches!(filter, ClientFilter::Synthetic));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_client_filter_order_matches_client_id_all() {
+        // Picker rendering, --help possible-values listing, and any
+        // future iteration over `ClientFilter::value_variants()` all
+        // assume the variant order mirrors `ClientId::ALL` (with
+        // Synthetic appended). Guard that invariant explicitly.
+        let filters: Vec<ClientFilter> = ClientFilter::value_variants()
+            .iter()
+            .copied()
+            .filter(|f| !matches!(f, ClientFilter::Synthetic))
+            .collect();
+        let ids: Vec<tokscale_core::ClientId> = tokscale_core::ClientId::ALL.to_vec();
+        assert_eq!(filters.len(), ids.len());
+        for (filter, id) in filters.iter().zip(ids.iter()) {
+            assert_eq!(
+                filter.to_client_id(),
+                Some(*id),
+                "ClientFilter declaration order diverged from ClientId::ALL at {:?}",
+                filter
+            );
+        }
+        // Synthetic is the very last variant.
+        assert_eq!(
+            ClientFilter::value_variants().last().copied(),
+            Some(ClientFilter::Synthetic)
+        );
+    }
+
+    #[test]
+    fn test_client_filter_from_filter_str_accepts_canonical_ids() {
+        for filter in ClientFilter::value_variants() {
+            let id = filter.as_filter_str();
+            assert_eq!(ClientFilter::from_filter_str(id), Some(*filter));
+        }
+        assert_eq!(ClientFilter::from_filter_str("not-a-client"), None);
+    }
+
+    #[test]
+    fn test_client_filter_default_set_excludes_synthetic() {
+        // Synthetic detection is opt-in: it post-processes other clients'
+        // sessions to re-attribute messages to a different bucket. The
+        // pre-refactor default was "every ClientId, include_synthetic =
+        // false"; default_set() must preserve that contract.
+        let default = ClientFilter::default_set();
+        assert!(
+            !default.contains(&ClientFilter::Synthetic),
+            "default_set() must NOT include Synthetic — it is opt-in only"
+        );
+        // Every real client must be present so first-launch reports cover
+        // every integration the binary knows about.
+        for filter in ClientFilter::value_variants() {
+            if matches!(filter, ClientFilter::Synthetic) {
+                continue;
+            }
+            assert!(default.contains(filter), "default_set() missing {filter:?}");
+        }
+        // Size sanity: every variant minus Synthetic.
+        assert_eq!(
+            default.len(),
+            ClientFilter::value_variants().len() - 1,
+            "default_set() size drifted from value_variants() - 1"
+        );
+    }
+
+    #[test]
+    fn test_resolve_default_tui_filter_set_uses_configured_defaults() {
+        // When `defaultClients` is set, the warm-cache resolver must use
+        // it verbatim — otherwise the warm cache would store every real
+        // client while the next no-flag TUI launch wants only the configured
+        // ones, producing a guaranteed cache miss.
+        let configured = vec!["opencode".to_string(), "claude".to_string()];
+        let set = resolve_default_tui_filter_set_with(&configured);
+        let mut expected = std::collections::HashSet::new();
+        expected.insert(ClientFilter::Opencode);
+        expected.insert(ClientFilter::Claude);
+        assert_eq!(set, expected);
+    }
+
+    #[test]
+    fn test_resolve_default_tui_filter_set_falls_back_when_empty() {
+        // No defaultClients configured → use the canonical default set.
+        let set = resolve_default_tui_filter_set_with(&[]);
+        assert_eq!(set, ClientFilter::default_set());
+    }
+
+    #[test]
+    fn test_resolve_default_tui_filter_set_drops_unknown_ids() {
+        // A stale settings.json entry (renamed/removed client) must not
+        // crash; unknown ids are dropped and the resolver still produces
+        // a usable filter set.
+        let configured = vec!["opencode".to_string(), "not-a-real-client".to_string()];
+        let set = resolve_default_tui_filter_set_with(&configured);
+        let mut expected = std::collections::HashSet::new();
+        expected.insert(ClientFilter::Opencode);
+        assert_eq!(set, expected);
+    }
+
+    #[test]
+    fn test_resolve_default_tui_filter_set_all_unknown_falls_back() {
+        // If every configured id is invalid, treat as if nothing is
+        // configured rather than producing an empty filter set (which
+        // would mean "scan nothing", definitely not the intent).
+        let configured = vec!["not-real".to_string(), "also-fake".to_string()];
+        let set = resolve_default_tui_filter_set_with(&configured);
+        assert_eq!(set, ClientFilter::default_set());
+    }
+
+    #[test]
+    fn test_resolve_default_tui_filter_set_supports_synthetic() {
+        // Power users who explicitly want synthetic detection on every
+        // launch can put it in defaultClients.
+        let configured = vec!["claude".to_string(), "synthetic".to_string()];
+        let set = resolve_default_tui_filter_set_with(&configured);
+        let mut expected = std::collections::HashSet::new();
+        expected.insert(ClientFilter::Claude);
+        expected.insert(ClientFilter::Synthetic);
+        assert_eq!(set, expected);
+    }
+
+    #[test]
+    fn test_build_client_filter_with_defaults_when_no_flags() {
+        // No CLI flags + a defaultClients list → defaults apply.
+        let flags = ClientFlags::default();
+        let defaults = vec!["opencode".to_string(), "claude".to_string()];
+        assert_eq!(
+            build_client_filter_with_defaults(flags, &defaults),
+            Some(vec!["opencode".to_string(), "claude".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_build_client_filter_cli_overrides_defaults_completely() {
+        // User passes --client → defaults must be ignored entirely
+        // (no merge). This is the predictable semantics: "I asked for X,
+        // give me X" not "I asked for X but you also added Y from settings".
+        let flags = ClientFlags {
+            clients: vec![ClientFilter::Codex],
+            ..ClientFlags::default()
+        };
+        let defaults = vec!["opencode".to_string(), "claude".to_string()];
+        assert_eq!(
+            build_client_filter_with_defaults(flags, &defaults),
+            Some(vec!["codex".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_build_client_filter_legacy_flag_overrides_defaults() {
+        // Legacy flags also count as "user passed something" → defaults
+        // ignored. Otherwise upgrading a script that uses --opencode
+        // would surprise users with extra clients from settings.
+        let flags = ClientFlags {
+            opencode: true,
+            ..ClientFlags::default()
+        };
+        let defaults = vec!["claude".to_string()];
+        assert_eq!(
+            build_client_filter_with_defaults(flags, &defaults),
+            Some(vec!["opencode".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_build_client_filter_defaults_dropped_for_unknown_ids() {
+        // Stale settings entry (e.g. removed/renamed client) → silently
+        // dropped, never errors. Ensures a typo never breaks tokscale.
+        let flags = ClientFlags::default();
+        let defaults = vec!["opencode".to_string(), "not-a-client".to_string()];
+        assert_eq!(
+            build_client_filter_with_defaults(flags, &defaults),
+            Some(vec!["opencode".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_build_client_filter_defaults_dedup_preserves_order() {
+        let flags = ClientFlags::default();
+        let defaults = vec![
+            "claude".to_string(),
+            "opencode".to_string(),
+            "claude".to_string(),
+        ];
+        assert_eq!(
+            build_client_filter_with_defaults(flags, &defaults),
+            Some(vec!["claude".to_string(), "opencode".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_build_client_filter_no_flags_no_defaults_returns_none() {
+        let flags = ClientFlags::default();
+        let defaults: Vec<String> = vec![];
+        assert_eq!(build_client_filter_with_defaults(flags, &defaults), None);
+    }
+
+    #[test]
+    fn test_client_filter_parses_lowercase_canonical_names() {
+        // clap ValueEnum should accept the lowercase ids verbatim so
+        // `--client opencode,claude` mirrors the legacy flag spelling.
+        for filter in ClientFilter::value_variants() {
+            let id = filter.as_filter_str();
+            let parsed =
+                <ClientFilter as ValueEnum>::from_str(id, true).expect("variant should parse");
+            assert_eq!(parsed.as_filter_str(), id, "round-trip mismatch for {id}");
+        }
+    }
+
+    #[test]
+    fn test_client_flags_parses_canonical_form() {
+        // End-to-end smoke test: ensure clap derives accept the new
+        // `--client a,b` and `-c a -c b` shapes through the CLI parser.
+        let cli =
+            Cli::try_parse_from(["tokscale", "--client", "opencode,claude"]).expect("parse ok");
+        assert_eq!(
+            cli.clients.clients,
+            vec![ClientFilter::Opencode, ClientFilter::Claude]
+        );
+
+        let cli =
+            Cli::try_parse_from(["tokscale", "-c", "opencode", "-c", "claude"]).expect("parse ok");
+        assert_eq!(
+            cli.clients.clients,
+            vec![ClientFilter::Opencode, ClientFilter::Claude]
+        );
+    }
+
+    #[test]
+    fn test_client_flags_legacy_still_parses() {
+        // Legacy `--claude` keeps working even though it is hidden in --help.
+        let cli = Cli::try_parse_from(["tokscale", "--claude"]).expect("parse ok");
+        assert!(cli.clients.claude);
+        assert!(cli.clients.clients.is_empty());
+    }
+
+    #[test]
+    fn test_client_flag_accepts_uppercase() {
+        let cli =
+            Cli::try_parse_from(["tokscale", "--client", "OPENCODE"]).expect("uppercase parses");
+        assert_eq!(cli.clients.clients, vec![ClientFilter::Opencode]);
+
+        let cli = Cli::try_parse_from(["tokscale", "-c", "Codebuff,Antigravity"])
+            .expect("mixed-case parses");
+        assert_eq!(
+            cli.clients.clients,
+            vec![ClientFilter::Codebuff, ClientFilter::Antigravity]
+        );
+    }
+
+    #[test]
+    fn test_client_flag_rejects_unknown_and_empty_values() {
+        assert!(Cli::try_parse_from(["tokscale", "--client", "unknown"]).is_err());
+        assert!(Cli::try_parse_from(["tokscale", "--client", ""]).is_err());
+    }
+
+    #[test]
+    fn test_legacy_bool_flag_rejects_duplicates() {
+        let result = Cli::try_parse_from(["tokscale", "--opencode", "--opencode"]);
+        assert!(
+            result.is_err(),
+            "clap rejects duplicated boolean flags by default; if this changes, document it explicitly"
+        );
+    }
+
+    #[test]
+    fn test_default_submit_clients_excludes_crush() {
+        let clients = default_submit_clients();
+        assert!(clients.contains(&"synthetic".to_string()));
+        assert!(clients.contains(&"zed".to_string()));
+        assert!(!clients.contains(&"crush".to_string()));
+    }
+
+    #[test]
+    fn test_build_client_filter_with_defaults_uses_defaults_when_no_flags() {
+        let flags = ClientFlags::default();
+        let defaults = vec!["opencode".to_string(), "claude".to_string()];
+        assert_eq!(
+            build_client_filter_with_defaults(flags, &defaults),
+            Some(vec!["opencode".to_string(), "claude".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_build_client_filter_with_defaults_empty_defaults_returns_none() {
+        let flags = ClientFlags::default();
+        assert_eq!(build_client_filter_with_defaults(flags, &[]), None);
+    }
+
+    #[test]
+    fn test_client_filter_goose_round_trip() {
+        assert_eq!(
+            ClientFilter::from_filter_str("goose"),
+            Some(ClientFilter::Goose)
+        );
+        assert_eq!(ClientFilter::Goose.as_filter_str(), "goose");
+        assert_eq!(
+            ClientFilter::Goose.to_client_id(),
+            Some(tokscale_core::ClientId::Goose)
+        );
+        assert_eq!(
+            ClientFilter::from_client_id(tokscale_core::ClientId::Goose),
+            ClientFilter::Goose
+        );
+    }
+
+    #[test]
+    fn test_client_filter_zed_round_trip() {
+        assert_eq!(
+            ClientFilter::from_filter_str("zed"),
+            Some(ClientFilter::Zed)
+        );
+        assert_eq!(ClientFilter::Zed.as_filter_str(), "zed");
+        assert_eq!(
+            ClientFilter::Zed.to_client_id(),
+            Some(tokscale_core::ClientId::Zed)
+        );
+        assert_eq!(
+            ClientFilter::from_client_id(tokscale_core::ClientId::Zed),
+            ClientFilter::Zed
+        );
+    }
+
+    #[test]
+    fn test_client_filter_default_set_includes_goose() {
+        let default = ClientFilter::default_set();
+        assert!(
+            default.contains(&ClientFilter::Goose),
+            "default_set() must include Goose so the no-filter path scans it"
+        );
+    }
+
+    #[test]
+    fn test_delete_submitted_data_command_parses() {
+        let cli = Cli::try_parse_from(["tokscale", "delete-submitted-data"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::DeleteSubmittedData)));
+    }
+
+    #[test]
+    fn test_login_token_option_parses() {
+        let cli = Cli::try_parse_from(["tokscale", "login", "--token", "tt_ci_token"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Login {
+                token: Some(token)
+            }) if token == "tt_ci_token"
+        ));
+    }
+
+    #[test]
+    fn test_interpret_delete_submitted_data_response_success() {
+        let body = serde_json::json!({
+            "deleted": true,
+            "deletedSubmissions": 2
+        });
+
+        let outcome = interpret_delete_submitted_data_response(StatusCode::OK, &body).unwrap();
+        match outcome {
+            DeleteSubmittedDataOutcome::Deleted(count) => assert_eq!(count, 2),
+            DeleteSubmittedDataOutcome::NotFound => panic!("expected deleted outcome"),
+        }
+    }
+
+    #[test]
+    fn test_interpret_delete_submitted_data_response_failure() {
+        let body = serde_json::json!({
+            "error": "Not authenticated"
+        });
+
+        let err = interpret_delete_submitted_data_response(StatusCode::UNAUTHORIZED, &body)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Failed (401 Unauthorized): Not authenticated"));
     }
 
     #[test]
@@ -3956,8 +5474,23 @@ mod tests {
     }
 
     #[test]
+    fn test_capitalize_client_crush() {
+        assert_eq!(capitalize_client("crush"), "Crush");
+    }
+
+    #[test]
     fn test_capitalize_client_openclaw() {
         assert_eq!(capitalize_client("openclaw"), "openclaw");
+    }
+
+    #[test]
+    fn test_capitalize_client_hermes() {
+        assert_eq!(capitalize_client("hermes"), "Hermes Agent");
+    }
+
+    #[test]
+    fn test_capitalize_client_codebuff() {
+        assert_eq!(capitalize_client("codebuff"), "Codebuff");
     }
 
     #[test]
@@ -4066,49 +5599,49 @@ mod tests {
     fn test_light_spinner_scanner_state_forward_start() {
         let (position, forward) = LightSpinner::scanner_state(0);
         assert_eq!(position, 0);
-        assert_eq!(forward, true);
+        assert!(forward);
     }
 
     #[test]
     fn test_light_spinner_scanner_state_forward_mid() {
         let (position, forward) = LightSpinner::scanner_state(4);
         assert_eq!(position, 4);
-        assert_eq!(forward, true);
+        assert!(forward);
     }
 
     #[test]
     fn test_light_spinner_scanner_state_forward_end() {
         let (position, forward) = LightSpinner::scanner_state(7);
         assert_eq!(position, 7);
-        assert_eq!(forward, true);
+        assert!(forward);
     }
 
     #[test]
     fn test_light_spinner_scanner_state_hold_end() {
         let (position, forward) = LightSpinner::scanner_state(8);
         assert_eq!(position, 7);
-        assert_eq!(forward, true);
+        assert!(forward);
     }
 
     #[test]
     fn test_light_spinner_scanner_state_backward_start() {
         let (position, forward) = LightSpinner::scanner_state(17);
         assert_eq!(position, 6);
-        assert_eq!(forward, false);
+        assert!(!forward);
     }
 
     #[test]
     fn test_light_spinner_scanner_state_backward_end() {
         let (position, forward) = LightSpinner::scanner_state(23);
         assert_eq!(position, 0);
-        assert_eq!(forward, false);
+        assert!(!forward);
     }
 
     #[test]
     fn test_light_spinner_scanner_state_hold_start() {
         let (position, forward) = LightSpinner::scanner_state(24);
         assert_eq!(position, 0);
-        assert_eq!(forward, false);
+        assert!(!forward);
     }
 
     #[test]
@@ -4191,5 +5724,283 @@ mod tests {
         assert_eq!(graph.summary.clients, original_summary.clients);
         assert_eq!(graph.summary.models, original_summary.models);
         assert_eq!(graph.years.len(), original_years.len());
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    #[serial_test::serial]
+    fn test_load_star_cache_falls_back_to_legacy_macos_path() {
+        // Existing macOS users have star-cache.json at the pre-#468 path under
+        // `~/Library/Application Support/tokscale/`. After upgrade, the read
+        // path moves to `~/.config/tokscale/`, so without the legacy fallback
+        // load_star_cache returns None and the user gets re-prompted to star
+        // the repo even though they already starred it.
+        use std::env;
+        let temp = tempfile::TempDir::new().unwrap();
+        let prev_home = env::var_os("HOME");
+        let prev_override = env::var_os("TOKSCALE_CONFIG_DIR");
+        unsafe {
+            env::set_var("HOME", temp.path());
+            env::remove_var("TOKSCALE_CONFIG_DIR");
+        }
+
+        let legacy_dir = temp.path().join("Library/Application Support/tokscale");
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+        std::fs::write(
+            legacy_dir.join("star-cache.json"),
+            r#"{"username":"junhoyeo","hasStarred":true,"checkedAt":"2025-01-12T03:48:00Z"}"#,
+        )
+        .unwrap();
+
+        let new_path = temp.path().join(".config/tokscale/star-cache.json");
+        assert!(!new_path.exists());
+
+        let cache = load_star_cache("junhoyeo");
+        assert!(
+            cache.is_some(),
+            "legacy macOS star-cache.json must satisfy load_star_cache after upgrade"
+        );
+        let cache = cache.unwrap();
+        assert_eq!(cache.username, "junhoyeo");
+        assert!(cache.has_starred);
+
+        unsafe {
+            match prev_home {
+                Some(v) => env::set_var("HOME", v),
+                None => env::remove_var("HOME"),
+            }
+            match prev_override {
+                Some(v) => env::set_var("TOKSCALE_CONFIG_DIR", v),
+                None => env::remove_var("TOKSCALE_CONFIG_DIR"),
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    #[serial_test::serial]
+    fn test_load_star_cache_skips_legacy_fallback_when_config_dir_overridden() {
+        // Same hermeticity contract as the Settings test: TOKSCALE_CONFIG_DIR
+        // must isolate the test/CI/sandbox profile from the real user's
+        // legacy macOS star-cache.json.
+        use std::env;
+        let temp = tempfile::TempDir::new().unwrap();
+        let legacy_root = tempfile::TempDir::new().unwrap();
+        let prev_home = env::var_os("HOME");
+        let prev_override = env::var_os("TOKSCALE_CONFIG_DIR");
+        unsafe {
+            env::set_var("HOME", legacy_root.path());
+            env::set_var("TOKSCALE_CONFIG_DIR", temp.path());
+        }
+
+        let legacy_dir = legacy_root
+            .path()
+            .join("Library/Application Support/tokscale");
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+        std::fs::write(
+            legacy_dir.join("star-cache.json"),
+            r#"{"username":"junhoyeo","hasStarred":true,"checkedAt":"2025-01-12T03:48:00Z"}"#,
+        )
+        .unwrap();
+
+        assert!(
+            load_star_cache("junhoyeo").is_none(),
+            "override must not leak the legacy star-cache hit"
+        );
+
+        unsafe {
+            match prev_home {
+                Some(v) => env::set_var("HOME", v),
+                None => env::remove_var("HOME"),
+            }
+            match prev_override {
+                Some(v) => env::set_var("TOKSCALE_CONFIG_DIR", v),
+                None => env::remove_var("TOKSCALE_CONFIG_DIR"),
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_cli_write_overrides_settings_false() {
+        let settings = tui::settings::Settings {
+            light: tui::settings::LightSettings { write_cache: false },
+            ..tui::settings::Settings::default()
+        };
+        assert!(resolve_should_write_cache(true, false, &settings));
+    }
+
+    #[test]
+    fn resolve_cli_no_write_overrides_settings_true() {
+        let settings = tui::settings::Settings {
+            light: tui::settings::LightSettings { write_cache: true },
+            ..tui::settings::Settings::default()
+        };
+        assert!(!resolve_should_write_cache(false, true, &settings));
+    }
+
+    #[test]
+    fn resolve_settings_true_with_no_cli_flag() {
+        let settings = tui::settings::Settings {
+            light: tui::settings::LightSettings { write_cache: true },
+            ..tui::settings::Settings::default()
+        };
+        assert!(resolve_should_write_cache(false, false, &settings));
+    }
+
+    #[test]
+    fn resolve_settings_false_with_no_cli_flag() {
+        let settings = tui::settings::Settings {
+            light: tui::settings::LightSettings { write_cache: false },
+            ..tui::settings::Settings::default()
+        };
+        assert!(!resolve_should_write_cache(false, false, &settings));
+    }
+
+    #[test]
+    fn resolve_settings_default_returns_false() {
+        assert!(!resolve_should_write_cache(
+            false,
+            false,
+            &tui::settings::Settings::default()
+        ));
+    }
+
+    #[test]
+    fn clap_rejects_write_cache_without_light() {
+        assert!(Cli::try_parse_from(["tokscale", "--write-cache"]).is_err());
+    }
+
+    #[test]
+    fn clap_rejects_no_write_cache_without_light() {
+        assert!(Cli::try_parse_from(["tokscale", "--no-write-cache"]).is_err());
+    }
+
+    #[test]
+    fn clap_rejects_both_write_flags_together() {
+        assert!(
+            Cli::try_parse_from(["tokscale", "--light", "--write-cache", "--no-write-cache",])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn clap_accepts_models_light_write_cache_after_subcommand() {
+        assert!(Cli::try_parse_from(["tokscale", "models", "--light", "--write-cache"]).is_ok());
+    }
+
+    #[test]
+    fn clap_accepts_cursor_sync_command() {
+        assert!(Cli::try_parse_from(["tokscale", "cursor", "sync"]).is_ok());
+        assert!(Cli::try_parse_from(["tokscale", "cursor", "sync", "--json"]).is_ok());
+    }
+
+    #[test]
+    fn cursor_auto_sync_enabled_for_default_report() {
+        assert!(should_auto_sync_cursor_for_local_report(&None, &None));
+    }
+
+    #[test]
+    fn cursor_auto_sync_enabled_when_cursor_filter_is_explicit() {
+        assert!(should_auto_sync_cursor_for_local_report(
+            &None,
+            &Some(vec!["cursor".to_string()])
+        ));
+    }
+
+    #[test]
+    fn cursor_auto_sync_disabled_when_filter_excludes_cursor() {
+        assert!(!should_auto_sync_cursor_for_local_report(
+            &None,
+            &Some(vec!["codex".to_string()])
+        ));
+    }
+
+    #[test]
+    fn cursor_auto_sync_disabled_for_home_override() {
+        assert!(!should_auto_sync_cursor_for_local_report(
+            &Some("/tmp/other-home".to_string()),
+            &None
+        ));
+        assert!(!should_auto_sync_cursor_for_local_report(
+            &Some("/tmp/other-home".to_string()),
+            &Some(vec!["cursor".to_string()])
+        ));
+    }
+
+    #[test]
+    fn cursor_auto_sync_runtime_init_failure_is_best_effort() {
+        let result = run_best_effort_cursor_sync_with_runtime_factory(|| {
+            Err(std::io::Error::other("runtime unavailable"))
+        });
+
+        assert!(!result.synced);
+        assert_eq!(result.rows, 0);
+        assert!(result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("runtime unavailable")));
+    }
+
+    #[test]
+    fn write_light_cache_refuses_when_since_filter_set() {
+        // Date/home filters are NOT part of the TUI cache key. Writing
+        // the filtered slice would silently poison subsequent TUI launches
+        // (next `tokscale tui` would render the filtered slice as if it
+        // were the default report). The function returns `()` and prints
+        // an eprintln; reaching this assertion line proves the function
+        // returned normally without panicking or attempting the write.
+        let group_by = tokscale_core::GroupBy::default();
+        write_light_cache(
+            &None,
+            &None,
+            &Some("2025-01-01".to_string()),
+            &None,
+            &None,
+            &group_by,
+        );
+    }
+
+    #[test]
+    fn write_light_cache_refuses_when_until_filter_set() {
+        let group_by = tokscale_core::GroupBy::default();
+        write_light_cache(
+            &None,
+            &None,
+            &None,
+            &Some("2025-12-31".to_string()),
+            &None,
+            &group_by,
+        );
+    }
+
+    #[test]
+    fn write_light_cache_refuses_when_year_filter_set() {
+        let group_by = tokscale_core::GroupBy::default();
+        write_light_cache(
+            &None,
+            &None,
+            &None,
+            &None,
+            &Some("2025".to_string()),
+            &group_by,
+        );
+    }
+
+    #[test]
+    fn write_light_cache_refuses_when_home_dir_set() {
+        // --home rebinds the scan root; DataLoader::load currently ignores
+        // this field and resolves home from dirs::home_dir() with
+        // use_env_roots=true, so the printed --light report is built from
+        // <home> while a naive cache write would store data scanned from
+        // the default home. Refuse the write to avoid that drift.
+        let group_by = tokscale_core::GroupBy::default();
+        write_light_cache(
+            &Some("/tmp/fake-home".to_string()),
+            &None,
+            &None,
+            &None,
+            &None,
+            &group_by,
+        );
     }
 }

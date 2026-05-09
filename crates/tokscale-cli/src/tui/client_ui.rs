@@ -67,6 +67,34 @@ pub const CLIENT_UI: [ClientUi; ClientId::COUNT] = [
         hotkey: 'l',
     },
     ClientUi {
+        display_name: "Crush",
+        hotkey: 'h',
+    },
+    ClientUi {
+        display_name: "Hermes Agent",
+        hotkey: 'e',
+    },
+    ClientUi {
+        display_name: "Copilot",
+        hotkey: 'c',
+    },
+    ClientUi {
+        display_name: "Goose",
+        hotkey: 'o',
+    },
+    ClientUi {
+        display_name: "Codebuff",
+        hotkey: 'b',
+    },
+    ClientUi {
+        display_name: "Antigravity",
+        hotkey: 'a',
+    },
+    ClientUi {
+        display_name: "Zed Agent",
+        hotkey: 'z',
+    },
+    ClientUi {
         display_name: "Anthropic API",
         hotkey: 'A',
     },

@@ -53,6 +53,7 @@ interface ProfilePageClientProps {
   username: string;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export default function ProfilePageClient({ initialData, username }: ProfilePageClientProps) {
   const [activeTab, setActiveTab] = useState<ProfileTab>("activity");
   const data = initialData;
@@ -166,20 +167,42 @@ const EARLY_ADOPTERS = ["code-yeongyu", "gtg7784", "qodot"];
           <ProfileTabBar activeTab={activeTab} onTabChange={setActiveTab} />
 
           {activeTab === "activity" && (
-            graphData ? (
-              <ActivitySection>
-                <ProfileActivity data={graphData} />
-                <ProfileStats
-                  stats={stats}
-                  favoriteModel={
-                    data.modelUsage?.reduce((max, current) => current.cost > max.cost ? current : max, data.modelUsage[0])?.model
-                  }
-                />
-              </ActivitySection>
-            ) : <ProfileEmptyActivity />
+            <div
+              role="tabpanel"
+              id="tabpanel-activity"
+              aria-labelledby="tab-activity"
+            >
+              {graphData ? (
+                <ActivitySection>
+                  <ProfileActivity data={graphData} />
+                  <ProfileStats
+                    stats={stats}
+                    favoriteModel={
+                      data.modelUsage?.reduce((max, current) => current.cost > max.cost ? current : max, data.modelUsage[0])?.model
+                    }
+                  />
+                </ActivitySection>
+              ) : <ProfileEmptyActivity />}
+            </div>
           )}
-          {activeTab === "breakdown" && <TokenBreakdown stats={stats} />}
-          {activeTab === "models" && <ProfileModels models={data.models} modelUsage={data.modelUsage} />}
+          {activeTab === "breakdown" && (
+            <div
+              role="tabpanel"
+              id="tabpanel-breakdown"
+              aria-labelledby="tab-breakdown"
+            >
+              <TokenBreakdown stats={stats} />
+            </div>
+          )}
+          {activeTab === "models" && (
+            <div
+              role="tabpanel"
+              id="tabpanel-models"
+              aria-labelledby="tab-models"
+            >
+              <ProfileModels models={data.models} modelUsage={data.modelUsage} />
+            </div>
+          )}
         </ContentWrapper>
       </MainContent>
 

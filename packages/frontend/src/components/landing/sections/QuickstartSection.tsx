@@ -14,6 +14,7 @@ export function QuickstartSection() {
   const [platform, setPlatform] = useState<Platform>("unix");
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (os === "windows") setPlatform("windows");
   }, [os]);
 

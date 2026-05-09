@@ -8,6 +8,7 @@ import {
   type SubmissionData,
 } from "@/lib/validation/submission";
 import { authenticatePersonalToken } from "@/lib/auth/personalTokens";
+import { getBearerToken } from "../../../lib/auth/bearerToken";
 import {
   recalculateDayTotals,
   buildModelBreakdown,
@@ -18,6 +19,7 @@ import {
   type ClientBreakdownData,
   type DeviceContributions,
 } from "@/lib/db/helpers";
+import { normalizeUsernameCacheKey, revalidateUsernamePaths } from "@/lib/db/usernameLookup";
 
 function normalizeSubmissionData(data: unknown): void {
   if (!data || typeof data !== "object") return;
@@ -66,15 +68,14 @@ export async function POST(request: Request) {
     // ========================================
     // STEP 1: Authentication
     // ========================================
-    const authHeader = request.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
+    const token = getBearerToken(request.headers.get("Authorization"));
+    if (!token) {
       return NextResponse.json(
         { error: "Missing or invalid Authorization header" },
         { status: 401 }
       );
     }
 
-    const token = authHeader.slice(7);
     const authResult = await authenticatePersonalToken(token, {
       touchLastUsedAt: false,
     });
@@ -125,6 +126,9 @@ export async function POST(request: Request) {
       for (const client_contrib of contribution.clients) {
         submittedClients.add(client_contrib.client);
       }
+    }
+    if (submittedClients.has("kilo")) {
+      submittedClients.add("kilocode" as SubmissionData["summary"]["clients"][number]);
     }
     const hashData: SubmissionData = {
       ...data,
@@ -403,7 +407,8 @@ export async function POST(request: Request) {
 
       for (const day of allDays) {
         if (day.sourceBreakdown) {
-          for (const [clientName, clientData] of Object.entries(day.sourceBreakdown)) {
+          for (const [rawClientName, clientData] of Object.entries(day.sourceBreakdown)) {
+            const clientName = rawClientName === "kilocode" ? "kilo" : rawClientName;
             allClients.add(clientName);
             const cd = clientData as ClientBreakdownData;
             if (cd.models) {
@@ -462,10 +467,13 @@ export async function POST(request: Request) {
     });
 
     try {
+      const usernameCacheKey = normalizeUsernameCacheKey(tokenRecord.username);
+
       revalidateTag("leaderboard", "max");
-      revalidateTag(`user:${tokenRecord.username}`, "max");
+      revalidateTag(`user:${usernameCacheKey}`, "max");
       revalidateTag("user-rank", "max");
-      revalidateTag(`user-rank:${tokenRecord.username}`, "max");
+      revalidateTag(`user-rank:${usernameCacheKey}`, "max");
+      revalidateUsernamePaths(tokenRecord.username);
     } catch (e) {
       console.error("Cache invalidation failed:", e);
     }

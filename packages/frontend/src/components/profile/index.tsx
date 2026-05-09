@@ -131,12 +131,15 @@ const UserDetails = styled.div`
 `;
 
 const RankBadge = styled.div`
-  width: 2rem;
+  min-width: 2rem;
   height: 2rem;
+  padding: 0 0.375rem;
   border-radius: 0.5rem;
   display: flex;
   align-items: center;
   justify-content: center;
+  white-space: nowrap;
+  align-self: flex-start;
 `;
 
 const RankText = styled.span`
@@ -306,10 +309,15 @@ const actionButtonStyles = css`
   transition: opacity 150ms ease-in-out;
   cursor: pointer;
 
+  background-color: var(--color-btn-bg);
+  border-color: var(--color-border-default);
+
+  color: var(--color-fg-default);
+
   &:hover {
     opacity: 0.8;
   }
-  
+
   &:focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px var(--color-bg-default), 0 0 0 4px #3b82f6;
@@ -438,14 +446,9 @@ export function ProfileHeader({ user, stats, lastUpdated }: ProfileHeaderProps) 
           <ActionButton
             onClick={handleShareClick}
             aria-label={`Share ${user.displayName || user.username}'s profile`}
-            style={{ backgroundColor: "var(--color-btn-bg)", borderColor: "var(--color-border-default)" }}
           >
             <Image src="/icons/icon-share.svg" alt="" width={20} height={20} aria-hidden="true" />
-            <ActionText
-              style={{ color: "var(--color-fg-default)" }}
-            >
-              Share
-            </ActionText>
+            <ActionText>Share</ActionText>
           </ActionButton>
         </ActionButtons>
       </FooterRow>
