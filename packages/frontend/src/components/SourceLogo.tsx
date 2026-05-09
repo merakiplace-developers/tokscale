@@ -2,8 +2,6 @@
 
 import styled from "styled-components";
 
-/* eslint-disable @next/next/no-img-element */
-
 interface SourceLogoProps {
   sourceId: string;
   height?: number;

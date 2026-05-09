@@ -217,35 +217,6 @@ const ActionButton = styled.button`
   }
 `;
 
-const LegendContainer = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-
-  @media (max-width: 560px) {
-    margin-left: 0;
-    width: 100%;
-    justify-content: flex-end;
-    min-width: 0;
-  }
-`;
-
-const LegendText = styled.span`
-  font-size: 12px;
-  font-weight: 500;
-`;
-
-const LegendBox = styled.div`
-  width: 12px;
-  height: 12px;
-  border-radius: 6px;
-  transition: transform 200ms;
-  
-  &:hover {
-    transform: scale(1.1);
-  }
-`;
 
 export function GraphControls({
   view,

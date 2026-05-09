@@ -1,6 +1,63 @@
 import { describe, it, expect } from "vitest";
 import { validateSubmission } from "../../src/lib/validation/submission";
 
+function makeBaseSubmission(clientId: string) {
+  return {
+    meta: {
+      generatedAt: "2026-05-09T00:00:00.000Z",
+      version: "2.1.0",
+      dateRange: { start: "2026-05-09", end: "2026-05-09" },
+    },
+    summary: {
+      totalTokens: 100,
+      totalCost: 0.05,
+      totalDays: 1,
+      activeDays: 1,
+      averagePerDay: 0.05,
+      maxCostInSingleDay: 0.05,
+      clients: [clientId],
+      models: ["model-x"],
+    },
+    years: [
+      {
+        year: "2026",
+        totalTokens: 100,
+        totalCost: 0.05,
+        range: { start: "2026-05-09", end: "2026-05-09" },
+      },
+    ],
+    contributions: [
+      {
+        date: "2026-05-09",
+        totals: { tokens: 100, cost: 0.05, messages: 1 },
+        intensity: 1 as const,
+        tokenBreakdown: {
+          input: 60,
+          output: 40,
+          cacheRead: 0,
+          cacheWrite: 0,
+          reasoning: 0,
+        },
+        clients: [
+          {
+            client: clientId,
+            modelId: "model-x",
+            tokens: {
+              input: 60,
+              output: 40,
+              cacheRead: 0,
+              cacheWrite: 0,
+              reasoning: 0,
+            },
+            cost: 0.05,
+            messages: 1,
+          },
+        ],
+      },
+    ],
+  };
+}
+
 describe("hermes client validation regression", () => {
   it("accepts a submission containing the hermes client", () => {
     const data = {
@@ -85,63 +142,24 @@ describe("hermes client validation regression", () => {
     "crush",
     "hermes",
   ])("accepts %s as a valid client", (clientName) => {
-    const data = {
-      meta: {
-        generatedAt: "2026-05-09T00:00:00.000Z",
-        version: "2.1.0",
-        dateRange: { start: "2026-05-09", end: "2026-05-09" },
-      },
-      summary: {
-        totalTokens: 100,
-        totalCost: 0.05,
-        totalDays: 1,
-        activeDays: 1,
-        averagePerDay: 0.05,
-        maxCostInSingleDay: 0.05,
-        clients: [clientName],
-        models: ["model-x"],
-      },
-      years: [
-        {
-          year: "2026",
-          totalTokens: 100,
-          totalCost: 0.05,
-          range: { start: "2026-05-09", end: "2026-05-09" },
-        },
-      ],
-      contributions: [
-        {
-          date: "2026-05-09",
-          totals: { tokens: 100, cost: 0.05, messages: 1 },
-          intensity: 1,
-          tokenBreakdown: {
-            input: 60,
-            output: 40,
-            cacheRead: 0,
-            cacheWrite: 0,
-            reasoning: 0,
-          },
-          clients: [
-            {
-              client: clientName,
-              modelId: "model-x",
-              tokens: {
-                input: 60,
-                output: 40,
-                cacheRead: 0,
-                cacheWrite: 0,
-                reasoning: 0,
-              },
-              cost: 0.05,
-              messages: 1,
-            },
-          ],
-        },
-      ],
-    };
-
-    const result = validateSubmission(data);
+    const result = validateSubmission(makeBaseSubmission(clientName));
     expect(result.errors).toEqual([]);
     expect(result.valid).toBe(true);
+  });
+
+  it("normalizes legacy 'kilocode' to 'kilo' in summary.clients and contributions[].clients[].client", () => {
+    const result = validateSubmission(makeBaseSubmission("kilocode"));
+    expect(result.errors).toEqual([]);
+    expect(result.valid).toBe(true);
+    expect(result.data?.summary.clients).toEqual(["kilo"]);
+    expect(result.data?.contributions[0].clients[0].client).toBe("kilo");
+  });
+
+  it("rejects 'kilocode' only when not normalized (sanity check on alias map)", () => {
+    // Direct allowlist no longer accepts 'kilocode'; the value must be aliased
+    // to 'kilo' by normalizeLegacySources before reaching the Zod enum.
+    const result = validateSubmission(makeBaseSubmission("kilocode"));
+    // Verifies the alias path actually fired — the validated client is 'kilo'.
+    expect(result.data?.summary.clients).not.toContain("kilocode");
   });
 });

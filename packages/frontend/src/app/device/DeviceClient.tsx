@@ -106,11 +106,6 @@ const SignInButton = styled.a`
   }
 `;
 
-const GitHubIcon = styled.svg`
-  width: 20px;
-  height: 20px;
-`;
-
 const SuccessContainer = styled.div`
   text-align: center;
 `;

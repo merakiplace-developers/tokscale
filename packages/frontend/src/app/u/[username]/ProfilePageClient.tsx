@@ -53,6 +53,7 @@ interface ProfilePageClientProps {
   username: string;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export default function ProfilePageClient({ initialData, username }: ProfilePageClientProps) {
   const [activeTab, setActiveTab] = useState<ProfileTab>("activity");
   const data = initialData;

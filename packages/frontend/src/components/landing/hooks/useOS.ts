@@ -9,9 +9,7 @@ export function useOS(): OS {
     const ua = navigator.userAgent;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (/Win/.test(ua)) setOs("windows");
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     else if (/Mac/.test(ua)) setOs("mac");
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     else setOs("linux");
   }, []);
 
