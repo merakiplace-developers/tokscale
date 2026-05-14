@@ -271,6 +271,18 @@ export async function POST(request: Request) {
 
         const existingDay = existingDaysMap.get(incomingDay.date);
 
+        // Per-day wipe scope. Only clients that this specific day's submission
+        // carries should evict matching slots on this day; clients that appear
+        // on other days of the same submission must NOT touch this day's
+        // historical data. Using the global `submittedClients` here would wipe
+        // an existing client slot whenever the new submission omits that
+        // client on this date (e.g. due to upstream Codex dedup), permanently
+        // losing previously-recorded tokens.
+        const daySubmittedClients = new Set<string>(Object.keys(incomingClientBreakdown));
+        if (daySubmittedClients.has("kilo")) {
+          daySubmittedClients.add("kilocode");
+        }
+
         if (existingDay) {
           // ── Device-aware merge ──
           let devContribs: DeviceContributions;
@@ -279,7 +291,7 @@ export async function POST(request: Request) {
           } else if (existingDay.sourceBreakdown) {
             devContribs = initDeviceContributionsFromLegacy(
               existingDay.sourceBreakdown as Record<string, ClientBreakdownData>,
-              submittedClients,
+              daySubmittedClients,
             );
           } else {
             devContribs = {};
@@ -290,11 +302,11 @@ export async function POST(request: Request) {
           const newDeviceSlot: Record<string, ClientBreakdownData> = {};
 
           for (const [clientName, clientData] of Object.entries(previousDeviceSlot)) {
-            if (!submittedClients.has(clientName)) {
+            if (!daySubmittedClients.has(clientName)) {
               newDeviceSlot[clientName] = clientData;
             }
           }
-          for (const clientName of submittedClients) {
+          for (const clientName of daySubmittedClients) {
             if (incomingClientBreakdown[clientName]) {
               newDeviceSlot[clientName] = { ...incomingClientBreakdown[clientName] };
             }
