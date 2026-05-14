@@ -226,3 +226,70 @@ export function mergeTimestampMs(
   if (incoming != null && existing != null) return Math.min(existing, incoming);
   return incoming ?? existing ?? null;
 }
+
+/**
+ * Build the next deviceContributions state for a single day's submission.
+ *
+ * The wipe scope is intentionally **per-day**: only clients that appear in
+ * this day's incoming data may evict matching slots on this day. Clients that
+ * appear on other days of the same submission must not touch this day's
+ * historical data — otherwise a new CLI that legitimately reports fewer days
+ * for a client (e.g. after upstream Codex dedup) would silently delete server
+ * state for the missing days.
+ *
+ * `kilocode` is treated as an alias of `kilo` for wipe purposes, so legacy
+ * `kilocode` slots get replaced when the new CLI submits `kilo` on the same
+ * day.
+ */
+export function buildDeviceContributionsForDay(input: {
+  existingSourceBreakdown: Record<string, ClientBreakdownData> | null;
+  existingDeviceContributions: DeviceContributions | null;
+  incomingClientBreakdown: Record<string, ClientBreakdownData>;
+  deviceKey: string;
+}): DeviceContributions {
+  const {
+    existingSourceBreakdown,
+    existingDeviceContributions,
+    incomingClientBreakdown,
+    deviceKey,
+  } = input;
+
+  const daySubmittedClients = new Set<string>(Object.keys(incomingClientBreakdown));
+  if (daySubmittedClients.has("kilo")) {
+    daySubmittedClients.add("kilocode");
+  }
+
+  let devContribs: DeviceContributions;
+  if (existingDeviceContributions) {
+    devContribs = { ...existingDeviceContributions };
+  } else if (existingSourceBreakdown) {
+    devContribs = initDeviceContributionsFromLegacy(
+      existingSourceBreakdown,
+      daySubmittedClients,
+    );
+  } else {
+    devContribs = {};
+  }
+
+  const previousDeviceSlot = devContribs[deviceKey] || {};
+  const newDeviceSlot: Record<string, ClientBreakdownData> = {};
+
+  for (const [clientName, clientData] of Object.entries(previousDeviceSlot)) {
+    if (!daySubmittedClients.has(clientName)) {
+      newDeviceSlot[clientName] = clientData;
+    }
+  }
+  for (const clientName of daySubmittedClients) {
+    if (incomingClientBreakdown[clientName]) {
+      newDeviceSlot[clientName] = { ...incomingClientBreakdown[clientName] };
+    }
+  }
+
+  if (Object.keys(newDeviceSlot).length > 0) {
+    devContribs[deviceKey] = newDeviceSlot;
+  } else {
+    delete devContribs[deviceKey];
+  }
+
+  return devContribs;
+}

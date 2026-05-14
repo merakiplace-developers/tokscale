@@ -14,8 +14,8 @@ import {
   buildModelBreakdown,
   clientContributionToBreakdownData,
   mergeTimestampMs,
-  initDeviceContributionsFromLegacy,
   aggregateDeviceContributions,
+  buildDeviceContributionsForDay,
   type ClientBreakdownData,
   type DeviceContributions,
 } from "@/lib/db/helpers";
@@ -271,52 +271,18 @@ export async function POST(request: Request) {
 
         const existingDay = existingDaysMap.get(incomingDay.date);
 
-        // Per-day wipe scope. Only clients that this specific day's submission
-        // carries should evict matching slots on this day; clients that appear
-        // on other days of the same submission must NOT touch this day's
-        // historical data. Using the global `submittedClients` here would wipe
-        // an existing client slot whenever the new submission omits that
-        // client on this date (e.g. due to upstream Codex dedup), permanently
-        // losing previously-recorded tokens.
-        const daySubmittedClients = new Set<string>(Object.keys(incomingClientBreakdown));
-        if (daySubmittedClients.has("kilo")) {
-          daySubmittedClients.add("kilocode");
-        }
-
         if (existingDay) {
-          // ── Device-aware merge ──
-          let devContribs: DeviceContributions;
-          if (existingDay.deviceContributions) {
-            devContribs = { ...(existingDay.deviceContributions as DeviceContributions) };
-          } else if (existingDay.sourceBreakdown) {
-            devContribs = initDeviceContributionsFromLegacy(
-              existingDay.sourceBreakdown as Record<string, ClientBreakdownData>,
-              daySubmittedClients,
-            );
-          } else {
-            devContribs = {};
-          }
-
-          // Replace current device's slot
-          const previousDeviceSlot = devContribs[deviceKey] || {};
-          const newDeviceSlot: Record<string, ClientBreakdownData> = {};
-
-          for (const [clientName, clientData] of Object.entries(previousDeviceSlot)) {
-            if (!daySubmittedClients.has(clientName)) {
-              newDeviceSlot[clientName] = clientData;
-            }
-          }
-          for (const clientName of daySubmittedClients) {
-            if (incomingClientBreakdown[clientName]) {
-              newDeviceSlot[clientName] = { ...incomingClientBreakdown[clientName] };
-            }
-          }
-
-          if (Object.keys(newDeviceSlot).length > 0) {
-            devContribs[deviceKey] = newDeviceSlot;
-          } else {
-            delete devContribs[deviceKey];
-          }
+          // Per-day device-aware merge.
+          // See buildDeviceContributionsForDay for why the wipe scope must be
+          // day-local rather than the union across all submitted days.
+          const devContribs = buildDeviceContributionsForDay({
+            existingSourceBreakdown:
+              (existingDay.sourceBreakdown as Record<string, ClientBreakdownData> | null) ?? null,
+            existingDeviceContributions:
+              (existingDay.deviceContributions as DeviceContributions | null) ?? null,
+            incomingClientBreakdown,
+            deviceKey,
+          });
 
           // Aggregate across all devices
           const mergedClientBreakdown = aggregateDeviceContributions(devContribs);
