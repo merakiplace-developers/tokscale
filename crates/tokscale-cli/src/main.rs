@@ -3,7 +3,9 @@ mod antigravity;
 mod auth;
 mod commands;
 mod cursor;
+mod device;
 mod paths;
+mod trae;
 mod tui;
 
 use crate::tui::client_ui;
@@ -79,7 +81,7 @@ struct Cli {
         long,
         value_name = "STRATEGY",
         default_value = "client,model",
-        help = "Grouping strategy for --light and --json output: model, client,model, client,provider,model, workspace,model"
+        help = "Grouping strategy for --light and --json output: model, client,model, client,provider,model, workspace,model, session,model, client,session,model"
     )]
     group_by: String,
 
@@ -105,7 +107,7 @@ enum Commands {
             long,
             value_name = "STRATEGY",
             default_value = "client,model",
-            help = "Grouping strategy for --light and --json output: model, client,model, client,provider,model, workspace,model"
+            help = "Grouping strategy for --light and --json output: model, client,model, client,provider,model, workspace,model, session,model, client,session,model"
         )]
         group_by: String,
         #[arg(
@@ -157,10 +159,14 @@ enum Commands {
     },
     #[command(about = "Show pricing for a model")]
     Pricing {
+        #[arg(help = "Model ID to look up, or `list-overrides`")]
         model_id: String,
         #[arg(long, help = "Output as JSON")]
         json: bool,
-        #[arg(long, help = "Force specific provider (litellm or openrouter)")]
+        #[arg(
+            long,
+            help = "Force specific provider (custom, litellm, or openrouter)"
+        )]
         provider: Option<String>,
         #[arg(long, help = "Disable spinner")]
         no_spinner: bool,
@@ -193,6 +199,11 @@ enum Commands {
     Logout,
     #[command(about = "Show current logged in user")]
     Whoami,
+    #[command(about = "Display saved API token as QR code")]
+    Qr {
+        #[arg(long, help = "Skip the on-screen warning + confirmation prompt")]
+        yes: bool,
+    },
     #[command(about = "Export contribution graph data as JSON")]
     Graph {
         #[arg(long, help = "Write to file instead of stdout")]
@@ -253,12 +264,22 @@ enum Commands {
         short: bool,
         #[arg(long, help = "Show Top OpenCode Agents (default)")]
         agents: bool,
-        #[arg(long, help = "Show Top Clients instead of Top OpenCode Agents")]
-        clients: bool,
+        #[arg(
+            long = "clients",
+            help = "Show Top Clients instead of Top OpenCode Agents"
+        )]
+        show_clients: bool,
         #[arg(long, help = "Disable pinning of Sisyphus agents in rankings")]
         disable_pinned: bool,
         #[arg(long, help = "Disable loading spinner (for scripting)")]
         no_spinner: bool,
+    },
+    #[command(about = "Show subscription usage and quota for AI providers")]
+    Usage {
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
+        #[arg(long, help = "Light terminal output (no TUI)")]
+        light: bool,
     },
     #[command(about = "Cursor IDE integration commands")]
     Cursor {
@@ -270,8 +291,26 @@ enum Commands {
         #[command(subcommand)]
         subcommand: AntigravitySubcommand,
     },
+    #[command(about = "Trae IDE integration commands")]
+    Trae {
+        #[command(subcommand)]
+        subcommand: TraeSubcommand,
+    },
     #[command(about = "Delete all submitted usage data from the server")]
     DeleteSubmittedData,
+    #[command(
+        about = "Show session time metrics (usage time, longest continuous, max concurrent)"
+    )]
+    TimeMetrics {
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        clients: ClientFlags,
+        #[command(flatten)]
+        date: DateRangeFlags,
+        #[arg(long, help = "Disable spinner")]
+        no_spinner: bool,
+    },
     #[command(about = "Warm TUI cache in background (internal)", hide = true)]
     WarmTuiCache,
 }
@@ -325,6 +364,34 @@ enum AntigravitySubcommand {
     },
     #[command(about = "Delete cached Antigravity usage artifacts")]
     PurgeCache,
+}
+
+#[derive(Subcommand)]
+enum TraeSubcommand {
+    #[command(about = "Authenticate Trae — auto-detect from desktop client or paste JWT")]
+    Login {
+        #[arg(long, help = "Paste access token directly (for manual fallback)")]
+        manual: bool,
+        #[arg(long, help = "Target Trae variant (solo, ide)")]
+        variant: Option<String>,
+    },
+    #[command(about = "Remove cached Trae credentials")]
+    Logout {
+        #[arg(long, help = "Target Trae variant (solo, ide)")]
+        variant: Option<String>,
+    },
+    #[command(about = "Show Trae authentication status")]
+    Status {
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
+    },
+    #[command(about = "Sync Trae usage data into local cache")]
+    Sync {
+        #[arg(long, help = "Number of days to sync (default: 30)")]
+        since: Option<i64>,
+        #[arg(long, help = "Include auxiliary usage types (not just main chat)")]
+        include_aux: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -513,6 +580,10 @@ fn main() -> Result<()> {
             reject_unsupported_home_override(&cli.home, "whoami")?;
             run_whoami_command()
         }
+        Some(Commands::Qr { yes }) => {
+            reject_unsupported_home_override(&cli.home, "qr")?;
+            run_qr_command(yes)
+        }
         Some(Commands::Graph {
             output,
             clients,
@@ -592,7 +663,7 @@ fn main() -> Result<()> {
             client_flags,
             short,
             agents,
-            clients,
+            show_clients,
             disable_pinned,
             no_spinner: _,
         }) => {
@@ -604,7 +675,7 @@ fn main() -> Result<()> {
                 client_filter,
                 short,
                 agents,
-                clients,
+                show_clients,
                 disable_pinned,
             )
         }
@@ -616,9 +687,39 @@ fn main() -> Result<()> {
             reject_unsupported_home_override(&cli.home, "antigravity")?;
             run_antigravity_command(subcommand)
         }
+        Some(Commands::Usage { json, light }) => {
+            reject_unsupported_home_override(&cli.home, "usage")?;
+            commands::usage::run(json, light)
+        }
+        Some(Commands::Trae { subcommand }) => {
+            reject_unsupported_home_override(&cli.home, "trae")?;
+            run_trae_command(subcommand)
+        }
         Some(Commands::DeleteSubmittedData) => {
             reject_unsupported_home_override(&cli.home, "delete-submitted-data")?;
             run_delete_data_command()
+        }
+        Some(Commands::TimeMetrics {
+            json,
+            clients,
+            date,
+            no_spinner,
+        }) => {
+            let today = date.today;
+            let week = date.week;
+            let month = date.month;
+            let (since, until) = build_date_filter(today, week, month, date.since, date.until);
+            let year = normalize_year_filter(today, week, month, date.year);
+            let clients = build_client_filter(clients);
+            run_time_metrics_report(
+                json,
+                cli.home.clone(),
+                clients,
+                since,
+                until,
+                year,
+                no_spinner,
+            )
         }
         Some(Commands::WarmTuiCache) => run_warm_tui_cache(),
         None => {
@@ -726,6 +827,9 @@ pub enum ClientFilter {
     Zed,
     #[value(name = "anthropic-api")]
     AnthropicApi,
+    Kiro,
+    #[value(name = "trae")]
+    Trae,
     Synthetic,
 }
 
@@ -758,6 +862,8 @@ impl ClientFilter {
             Self::Antigravity => "antigravity",
             Self::Zed => "zed",
             Self::AnthropicApi => "anthropic-api",
+            Self::Kiro => "kiro",
+            Self::Trae => "trae",
             Self::Synthetic => "synthetic",
         }
     }
@@ -793,6 +899,8 @@ impl ClientFilter {
             Self::Antigravity => Some(ClientId::Antigravity),
             Self::Zed => Some(ClientId::Zed),
             Self::AnthropicApi => Some(ClientId::AnthropicApi),
+            Self::Kiro => Some(ClientId::Kiro),
+            Self::Trae => Some(ClientId::Trae),
             Self::Synthetic => None,
         }
     }
@@ -825,6 +933,8 @@ impl ClientFilter {
             ClientId::Antigravity => Self::Antigravity,
             ClientId::Zed => Self::Zed,
             ClientId::AnthropicApi => Self::AnthropicApi,
+            ClientId::Kiro => Self::Kiro,
+            ClientId::Trae => Self::Trae,
         }
     }
 
@@ -924,6 +1034,10 @@ pub struct ClientFlags {
     #[arg(long = "anthropic-api", hide = true)]
     pub anthropic_api: bool,
     #[arg(long, hide = true)]
+    pub kiro: bool,
+    #[arg(long, hide = true)]
+    pub trae: bool,
+    #[arg(long, hide = true)]
     pub synthetic: bool,
 }
 
@@ -977,7 +1091,7 @@ fn build_client_filter_with_defaults(
         }
     }
 
-    let legacy: [(bool, ClientFilter); 24] = [
+    let legacy: [(bool, ClientFilter); 26] = [
         (flags.opencode, ClientFilter::Opencode),
         (flags.claude, ClientFilter::Claude),
         (flags.codex, ClientFilter::Codex),
@@ -1001,6 +1115,8 @@ fn build_client_filter_with_defaults(
         (flags.antigravity, ClientFilter::Antigravity),
         (flags.zed, ClientFilter::Zed),
         (flags.anthropic_api, ClientFilter::AnthropicApi),
+        (flags.kiro, ClientFilter::Kiro),
+        (flags.trae, ClientFilter::Trae),
         (flags.synthetic, ClientFilter::Synthetic),
     ];
 
@@ -1087,9 +1203,10 @@ fn auto_sync_cursor_for_local_report(
         return None;
     }
 
-    // Skip the implicit refresh when the cache is recent enough — running
-    // `tokscale models` 30× in a script must not produce 30 Cursor API
-    // calls. The manual `tokscale cursor sync` command bypasses this gate.
+    // Skip the implicit refresh when each expected Cursor account cache is
+    // recent enough — running `tokscale models` 30× in a script must not
+    // produce 30 Cursor API calls. The manual `tokscale cursor sync` command
+    // bypasses this gate.
     if cursor::cursor_usage_cache_is_fresh(cursor::CURSOR_AUTO_SYNC_FRESHNESS) {
         return None;
     }
@@ -1490,6 +1607,8 @@ fn run_models_report(
             workspace_key: Option<serde_json::Value>,
             #[serde(skip_serializing_if = "Option::is_none")]
             workspace_label: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            session_id: Option<String>,
             model: String,
             provider: String,
             input: i64,
@@ -1499,6 +1618,7 @@ fn run_models_report(
             reasoning: i64,
             message_count: i32,
             cost: f64,
+            performance: tokscale_core::ModelPerformance,
         }
 
         #[derive(serde::Serialize)]
@@ -1535,6 +1655,11 @@ fn run_models_report(
                     } else {
                         None
                     },
+                    session_id: if matches!(group_by, GroupBy::Session | GroupBy::ClientSession) {
+                        e.session_id
+                    } else {
+                        None
+                    },
                     client: e.client,
                     merged_clients: e.merged_clients,
                     model: e.model,
@@ -1546,6 +1671,7 @@ fn run_models_report(
                     reasoning: e.reasoning,
                     message_count: e.message_count,
                     cost: e.cost,
+                    performance: e.performance,
                 })
                 .collect(),
             total_input: report.total_input,
@@ -1560,6 +1686,7 @@ fn run_models_report(
     } else {
         use comfy_table::{Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
 
+        let total_performance = aggregate_model_report_performance(&report.entries);
         let term_width = crossterm::terminal::size()
             .map(|(w, _)| w as usize)
             .unwrap_or(120);
@@ -1586,6 +1713,7 @@ fn run_models_report(
                         Cell::new("Model").fg(Color::Cyan),
                         Cell::new("Input").fg(Color::Cyan),
                         Cell::new("Output").fg(Color::Cyan),
+                        Cell::new("ms/1K").fg(Color::Cyan),
                         Cell::new("Cost").fg(Color::Cyan),
                         Cell::new("Cost/1M").fg(Color::Cyan),
                     ]);
@@ -1607,6 +1735,8 @@ fn run_models_report(
                                 .set_alignment(CellAlignment::Right),
                             Cell::new(format_tokens_with_commas(entry.output))
                                 .set_alignment(CellAlignment::Right),
+                            Cell::new(format_ms_per_1k(entry.performance.ms_per_1k_tokens))
+                                .set_alignment(CellAlignment::Right),
                             Cell::new(format_currency(entry.cost))
                                 .set_alignment(CellAlignment::Right),
                             Cell::new(format_cost_per_million(entry.cost, total_tokens))
@@ -1628,6 +1758,9 @@ fn run_models_report(
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
                         Cell::new(format_tokens_with_commas(report.total_output))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                        Cell::new(format_ms_per_1k(total_performance.ms_per_1k_tokens))
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
                         Cell::new(format_currency(report.total_cost))
@@ -1645,6 +1778,7 @@ fn run_models_report(
                         Cell::new("Model").fg(Color::Cyan),
                         Cell::new("Input").fg(Color::Cyan),
                         Cell::new("Output").fg(Color::Cyan),
+                        Cell::new("ms/1K").fg(Color::Cyan),
                         Cell::new("Cost").fg(Color::Cyan),
                         Cell::new("Cost/1M").fg(Color::Cyan),
                     ]);
@@ -1659,6 +1793,8 @@ fn run_models_report(
                             Cell::new(format_tokens_with_commas(entry.input))
                                 .set_alignment(CellAlignment::Right),
                             Cell::new(format_tokens_with_commas(entry.output))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_ms_per_1k(entry.performance.ms_per_1k_tokens))
                                 .set_alignment(CellAlignment::Right),
                             Cell::new(format_currency(entry.cost))
                                 .set_alignment(CellAlignment::Right),
@@ -1683,6 +1819,9 @@ fn run_models_report(
                         Cell::new(format_tokens_with_commas(report.total_output))
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
+                        Cell::new(format_ms_per_1k(total_performance.ms_per_1k_tokens))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
                         Cell::new(format_currency(report.total_cost))
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
@@ -1691,10 +1830,79 @@ fn run_models_report(
                             .set_alignment(CellAlignment::Right),
                     ]);
                 }
+                GroupBy::Session | GroupBy::ClientSession => {
+                    let show_client = group_by == GroupBy::ClientSession;
+                    let mut header = Vec::with_capacity(6);
+                    if show_client {
+                        header.push(Cell::new("Client").fg(Color::Cyan));
+                    }
+                    header.extend([
+                        Cell::new("Session").fg(Color::Cyan),
+                        Cell::new("Model").fg(Color::Cyan),
+                        Cell::new("Total").fg(Color::Cyan),
+                        Cell::new("Cost").fg(Color::Cyan),
+                    ]);
+                    table.set_header(header);
+
+                    for entry in &report.entries {
+                        let total_tokens =
+                            entry.input + entry.output + entry.cache_read + entry.cache_write;
+                        let session_label = entry
+                            .session_id
+                            .clone()
+                            .unwrap_or_else(|| "(unknown)".to_string());
+                        let mut row = Vec::with_capacity(6);
+                        if show_client {
+                            row.push(Cell::new(capitalize_client(&entry.client)));
+                        }
+                        row.extend([
+                            Cell::new(session_label),
+                            Cell::new(&entry.model),
+                            Cell::new(format_tokens_with_commas(total_tokens))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_currency(entry.cost))
+                                .set_alignment(CellAlignment::Right),
+                        ]);
+                        table.add_row(row);
+                    }
+
+                    let total_all = report.total_input
+                        + report.total_output
+                        + report.total_cache_read
+                        + report.total_cache_write;
+                    let mut total_row = Vec::with_capacity(6);
+                    if show_client {
+                        total_row.push(
+                            Cell::new("Total")
+                                .fg(Color::Yellow)
+                                .add_attribute(Attribute::Bold),
+                        );
+                        total_row.push(Cell::new(""));
+                    } else {
+                        total_row.push(
+                            Cell::new("Total")
+                                .fg(Color::Yellow)
+                                .add_attribute(Attribute::Bold),
+                        );
+                    }
+                    total_row.push(Cell::new(""));
+                    total_row.push(
+                        Cell::new(format_tokens_with_commas(total_all))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                    );
+                    total_row.push(
+                        Cell::new(format_currency(report.total_cost))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                    );
+                    table.add_row(total_row);
+                }
                 GroupBy::WorkspaceModel => {
                     table.set_header(vec![
                         Cell::new("Workspace").fg(Color::Cyan),
                         Cell::new("Model").fg(Color::Cyan),
+                        Cell::new("ms/1K").fg(Color::Cyan),
                         Cell::new("Cost").fg(Color::Cyan),
                     ]);
 
@@ -1702,6 +1910,8 @@ fn run_models_report(
                         table.add_row(vec![
                             Cell::new(workspace_name(entry.workspace_label.as_deref())),
                             Cell::new(&entry.model),
+                            Cell::new(format_ms_per_1k(entry.performance.ms_per_1k_tokens))
+                                .set_alignment(CellAlignment::Right),
                             Cell::new(format_currency(entry.cost))
                                 .set_alignment(CellAlignment::Right),
                         ]);
@@ -1712,6 +1922,9 @@ fn run_models_report(
                             .fg(Color::Yellow)
                             .add_attribute(Attribute::Bold),
                         Cell::new(""),
+                        Cell::new(format_ms_per_1k(total_performance.ms_per_1k_tokens))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
                         Cell::new(format_currency(report.total_cost))
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
@@ -1730,6 +1943,7 @@ fn run_models_report(
                         Cell::new("Cache Write").fg(Color::Cyan),
                         Cell::new("Cache Read").fg(Color::Cyan),
                         Cell::new("Total").fg(Color::Cyan),
+                        Cell::new("ms/1K").fg(Color::Cyan),
                         Cell::new("Cost").fg(Color::Cyan),
                         Cell::new("Cost/1M").fg(Color::Cyan),
                     ]);
@@ -1757,6 +1971,8 @@ fn run_models_report(
                             Cell::new(format_tokens_with_commas(entry.cache_read))
                                 .set_alignment(CellAlignment::Right),
                             Cell::new(format_tokens_with_commas(total))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_ms_per_1k(entry.performance.ms_per_1k_tokens))
                                 .set_alignment(CellAlignment::Right),
                             Cell::new(format_currency(entry.cost))
                                 .set_alignment(CellAlignment::Right),
@@ -1790,6 +2006,9 @@ fn run_models_report(
                         Cell::new(format_tokens_with_commas(total_all))
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
+                        Cell::new(format_ms_per_1k(total_performance.ms_per_1k_tokens))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
                         Cell::new(format_currency(report.total_cost))
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
@@ -1797,6 +2016,94 @@ fn run_models_report(
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
                     ]);
+                }
+                GroupBy::Session | GroupBy::ClientSession => {
+                    let show_client = group_by == GroupBy::ClientSession;
+                    let mut header = Vec::with_capacity(9);
+                    if show_client {
+                        header.push(Cell::new("Client").fg(Color::Cyan));
+                    }
+                    header.extend([
+                        Cell::new("Session").fg(Color::Cyan),
+                        Cell::new("Provider").fg(Color::Cyan),
+                        Cell::new("Model").fg(Color::Cyan),
+                        Cell::new("Input").fg(Color::Cyan),
+                        Cell::new("Output").fg(Color::Cyan),
+                        Cell::new("Total").fg(Color::Cyan),
+                        Cell::new("Cost").fg(Color::Cyan),
+                        Cell::new("Cost/1M").fg(Color::Cyan),
+                    ]);
+                    table.set_header(header);
+
+                    for entry in &report.entries {
+                        let total =
+                            entry.input + entry.output + entry.cache_write + entry.cache_read;
+                        let session_label = entry
+                            .session_id
+                            .clone()
+                            .unwrap_or_else(|| "(unknown)".to_string());
+                        let mut row = Vec::with_capacity(9);
+                        if show_client {
+                            row.push(Cell::new(capitalize_client(&entry.client)));
+                        }
+                        row.extend([
+                            Cell::new(session_label),
+                            Cell::new(&entry.provider).add_attribute(Attribute::Dim),
+                            Cell::new(&entry.model),
+                            Cell::new(format_tokens_with_commas(entry.input))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_tokens_with_commas(entry.output))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_tokens_with_commas(total))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_currency(entry.cost))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_cost_per_million(entry.cost, total))
+                                .set_alignment(CellAlignment::Right),
+                        ]);
+                        table.add_row(row);
+                    }
+
+                    let total_all = report.total_input
+                        + report.total_output
+                        + report.total_cache_write
+                        + report.total_cache_read;
+                    let mut total_row: Vec<Cell> = Vec::with_capacity(9);
+                    total_row.push(
+                        Cell::new("Total")
+                            .fg(Color::Yellow)
+                            .add_attribute(Attribute::Bold),
+                    );
+                    let blanks = if show_client { 3 } else { 2 };
+                    for _ in 0..blanks {
+                        total_row.push(Cell::new(""));
+                    }
+                    total_row.push(
+                        Cell::new(format_tokens_with_commas(report.total_input))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                    );
+                    total_row.push(
+                        Cell::new(format_tokens_with_commas(report.total_output))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                    );
+                    total_row.push(
+                        Cell::new(format_tokens_with_commas(total_all))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                    );
+                    total_row.push(
+                        Cell::new(format_currency(report.total_cost))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                    );
+                    total_row.push(
+                        Cell::new(format_cost_per_million(report.total_cost, total_all))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                    );
+                    table.add_row(total_row);
                 }
                 GroupBy::ClientModel | GroupBy::ClientProviderModel => {
                     table.set_header(vec![
@@ -1809,6 +2116,7 @@ fn run_models_report(
                         Cell::new("Cache Write").fg(Color::Cyan),
                         Cell::new("Cache Read").fg(Color::Cyan),
                         Cell::new("Total").fg(Color::Cyan),
+                        Cell::new("ms/1K").fg(Color::Cyan),
                         Cell::new("Cost").fg(Color::Cyan),
                         Cell::new("Cost/1M").fg(Color::Cyan),
                     ]);
@@ -1832,6 +2140,8 @@ fn run_models_report(
                                 .set_alignment(CellAlignment::Right),
                             Cell::new(format_tokens_with_commas(total))
                                 .set_alignment(CellAlignment::Right),
+                            Cell::new(format_ms_per_1k(entry.performance.ms_per_1k_tokens))
+                                .set_alignment(CellAlignment::Right),
                             Cell::new(format_currency(entry.cost))
                                 .set_alignment(CellAlignment::Right),
                             Cell::new(format_cost_per_million(entry.cost, total))
@@ -1865,6 +2175,9 @@ fn run_models_report(
                         Cell::new(format_tokens_with_commas(total_all))
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
+                        Cell::new(format_ms_per_1k(total_performance.ms_per_1k_tokens))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
                         Cell::new(format_currency(report.total_cost))
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
@@ -1884,6 +2197,7 @@ fn run_models_report(
                         Cell::new("Cache Write").fg(Color::Cyan),
                         Cell::new("Cache Read").fg(Color::Cyan),
                         Cell::new("Total").fg(Color::Cyan),
+                        Cell::new("ms/1K").fg(Color::Cyan),
                         Cell::new("Cost").fg(Color::Cyan),
                     ]);
 
@@ -1911,6 +2225,8 @@ fn run_models_report(
                             Cell::new(format_tokens_with_commas(entry.cache_read))
                                 .set_alignment(CellAlignment::Right),
                             Cell::new(format_tokens_with_commas(total))
+                                .set_alignment(CellAlignment::Right),
+                            Cell::new(format_ms_per_1k(entry.performance.ms_per_1k_tokens))
                                 .set_alignment(CellAlignment::Right),
                             Cell::new(format_currency(entry.cost))
                                 .set_alignment(CellAlignment::Right),
@@ -1941,6 +2257,9 @@ fn run_models_report(
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
                         Cell::new(format_tokens_with_commas(total_all))
+                            .fg(Color::Yellow)
+                            .set_alignment(CellAlignment::Right),
+                        Cell::new(format_ms_per_1k(total_performance.ms_per_1k_tokens))
                             .fg(Color::Yellow)
                             .set_alignment(CellAlignment::Right),
                         Cell::new(format_currency(report.total_cost))
@@ -2568,7 +2887,7 @@ fn run_wrapped_command(
     client_filter: Option<Vec<String>>,
     short: bool,
     agents: bool,
-    clients: bool,
+    show_clients: bool,
     disable_pinned: bool,
 ) -> Result<()> {
     use colored::Colorize;
@@ -2578,7 +2897,7 @@ fn run_wrapped_command(
     println!("{}", "  Generating wrapped image...".bright_black());
     println!();
 
-    let include_agents = !clients || agents;
+    let include_agents = !show_clients || agents;
     let wrapped_options = commands::wrapped::WrappedOptions {
         output,
         year,
@@ -2617,16 +2936,20 @@ fn run_pricing_lookup(
     use tokio::runtime::Runtime;
     use tokscale_core::pricing::PricingService;
 
+    if model_id.eq_ignore_ascii_case("list-overrides") {
+        return run_pricing_list_overrides(json);
+    }
+
     let provider_normalized = provider.map(|p| p.to_lowercase());
     if let Some(ref p) = provider_normalized {
-        if p != "litellm" && p != "openrouter" {
+        if p != "custom" && p != "litellm" && p != "openrouter" {
             println!(
                 "\n  {}",
                 format!("Invalid provider: {}", provider.unwrap_or("")).red()
             );
             println!(
                 "{}\n",
-                "  Valid providers: litellm, openrouter".bright_black()
+                "  Valid providers: custom, litellm, openrouter".bright_black()
             );
             std::process::exit(1);
         }
@@ -2738,10 +3061,11 @@ fn run_pricing_lookup(
             Some(pricing) => {
                 println!("\n  Pricing for: {}", model_id.bold());
                 println!("  Matched key: {}", pricing.matched_key);
-                let source_label = if pricing.source.eq_ignore_ascii_case("litellm") {
-                    "LiteLLM"
-                } else {
-                    "OpenRouter"
+                let source_label = match pricing.source.to_lowercase().as_str() {
+                    "custom" => "Custom",
+                    "litellm" => "LiteLLM",
+                    "openrouter" => "OpenRouter",
+                    _ => pricing.source.as_str(),
                 };
                 println!("  Source: {}", source_label);
                 println!();
@@ -2773,6 +3097,105 @@ fn run_pricing_lookup(
     Ok(())
 }
 
+fn run_pricing_list_overrides(json: bool) -> Result<()> {
+    use colored::Colorize;
+    use tokscale_core::pricing::custom::CustomPricing;
+    use tokscale_core::pricing::ModelPricing;
+
+    fn per_million(value: Option<f64>) -> Option<f64> {
+        value.map(|v| v * 1_000_000.0)
+    }
+
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct OverrideEntry {
+        model_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        input_cost_per_million_tokens: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output_cost_per_million_tokens: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_read_input_token_cost_per_million_tokens: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_creation_input_token_cost_per_million_tokens: Option<f64>,
+    }
+
+    fn entry(model_id: &str, pricing: &ModelPricing) -> OverrideEntry {
+        OverrideEntry {
+            model_id: model_id.to_string(),
+            input_cost_per_million_tokens: per_million(pricing.input_cost_per_token),
+            output_cost_per_million_tokens: per_million(pricing.output_cost_per_token),
+            cache_read_input_token_cost_per_million_tokens: per_million(
+                pricing.cache_read_input_token_cost,
+            ),
+            cache_creation_input_token_cost_per_million_tokens: per_million(
+                pricing.cache_creation_input_token_cost,
+            ),
+        }
+    }
+
+    let path = CustomPricing::default_path();
+    let overrides = CustomPricing::load_from_path(&path);
+    let mut entries: Vec<OverrideEntry> = overrides
+        .entries()
+        .map(|(model_id, pricing)| entry(model_id, pricing))
+        .collect();
+    entries.sort_by(|a, b| a.model_id.cmp(&b.model_id));
+
+    if json {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Output {
+            path: String,
+            count: usize,
+            models: Vec<OverrideEntry>,
+        }
+
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&Output {
+                path: path.display().to_string(),
+                count: entries.len(),
+                models: entries,
+            })?
+        );
+        return Ok(());
+    }
+
+    if entries.is_empty() {
+        println!(
+            "\n  {}\n  Tried: {}\n",
+            "No custom pricing overrides loaded".yellow(),
+            path.display()
+        );
+        return Ok(());
+    }
+
+    println!("\n  {}", "Custom pricing overrides".bold());
+    println!("  Path: {}", path.display());
+    println!("  Loaded once at startup; restart tokscale after editing this file.");
+    println!();
+
+    for entry in entries {
+        println!("  {}", entry.model_id.bold());
+        if let Some(input) = entry.input_cost_per_million_tokens {
+            println!("    Input:  ${:.2} / 1M tokens", input);
+        }
+        if let Some(output) = entry.output_cost_per_million_tokens {
+            println!("    Output: ${:.2} / 1M tokens", output);
+        }
+        if let Some(cache_read) = entry.cache_read_input_token_cost_per_million_tokens {
+            println!("    Cache Read:  ${:.2} / 1M tokens", cache_read);
+        }
+        if let Some(cache_write) = entry.cache_creation_input_token_cost_per_million_tokens {
+            println!("    Cache Write: ${:.2} / 1M tokens", cache_write);
+        }
+    }
+    println!();
+
+    Ok(())
+}
+
 fn format_currency(n: f64) -> String {
     format!("${:.2}", n)
 }
@@ -2787,6 +3210,47 @@ fn format_cost_per_million(cost: f64, total_tokens: i64) -> String {
     } else {
         format!("${:.2}/M", cost_per_m)
     }
+}
+
+fn format_ms_per_1k(ms_per_1k_tokens: Option<f64>) -> String {
+    let Some(value) = ms_per_1k_tokens else {
+        return "—".to_string();
+    };
+    if !value.is_finite() || value <= 0.0 {
+        "—".to_string()
+    } else if value >= 1000.0 {
+        format!("{:.1}s", value / 1000.0)
+    } else {
+        format!("{:.0}ms", value)
+    }
+}
+
+fn model_entry_total_tokens(entry: &tokscale_core::ModelUsage) -> i64 {
+    entry.input.max(0)
+        + entry.output.max(0)
+        + entry.cache_read.max(0)
+        + entry.cache_write.max(0)
+        + entry.reasoning.max(0)
+}
+
+fn aggregate_model_report_performance(
+    entries: &[tokscale_core::ModelUsage],
+) -> tokscale_core::ModelPerformance {
+    let mut performance = tokscale_core::ModelPerformance::default();
+    for entry in entries {
+        performance.total_duration_ms = performance
+            .total_duration_ms
+            .saturating_add(entry.performance.total_duration_ms);
+        performance.timed_tokens = performance
+            .timed_tokens
+            .saturating_add(entry.performance.timed_tokens);
+        performance.sample_count = performance
+            .sample_count
+            .saturating_add(entry.performance.sample_count);
+    }
+    let total_tokens = entries.iter().map(model_entry_total_tokens).sum();
+    performance.finalize(total_tokens);
+    performance
 }
 
 /// Format a URL as an OSC 8 clickable hyperlink for supported terminals.
@@ -3283,6 +3747,8 @@ struct TsDailyContribution {
     intensity: u8,
     token_breakdown: TsTokenBreakdown,
     clients: Vec<TsSourceContribution>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    active_time_ms: Option<i64>,
 }
 
 #[derive(serde::Serialize)]
@@ -3323,14 +3789,38 @@ struct TsExportMeta {
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+struct TsSubmitDevice {
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TsTimeMetrics {
+    total_active_time_ms: i64,
+    longest_continuous_ms: i64,
+    max_concurrent_sessions: u32,
+    session_count: u32,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TsTokenContributionData {
     meta: TsExportMeta,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device: Option<TsSubmitDevice>,
     summary: TsDataSummary,
     years: Vec<TsYearSummary>,
     contributions: Vec<TsDailyContribution>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    time_metrics: Option<TsTimeMetrics>,
 }
 
-fn to_ts_token_contribution_data(graph: &tokscale_core::GraphResult) -> TsTokenContributionData {
+fn to_ts_token_contribution_data(
+    graph: &tokscale_core::GraphResult,
+    device: Option<&device::SubmitDevice>,
+) -> TsTokenContributionData {
     TsTokenContributionData {
         meta: TsExportMeta {
             generated_at: graph.meta.generated_at.clone(),
@@ -3340,6 +3830,10 @@ fn to_ts_token_contribution_data(graph: &tokscale_core::GraphResult) -> TsTokenC
                 end: graph.meta.date_range_end.clone(),
             },
         },
+        device: device.map(|d| TsSubmitDevice {
+            id: d.id.clone(),
+            name: d.name.clone(),
+        }),
         summary: TsDataSummary {
             total_tokens: graph.summary.total_tokens,
             total_cost: graph.summary.total_cost,
@@ -3403,8 +3897,15 @@ fn to_ts_token_contribution_data(graph: &tokscale_core::GraphResult) -> TsTokenC
                         messages: s.messages,
                     })
                     .collect(),
+                active_time_ms: d.active_time_ms,
             })
             .collect(),
+        time_metrics: graph.time_metrics.as_ref().map(|tm| TsTimeMetrics {
+            total_active_time_ms: tm.total_active_time_ms,
+            longest_continuous_ms: tm.longest_continuous_ms,
+            max_concurrent_sessions: tm.max_concurrent_sessions,
+            session_count: tm.session_count,
+        }),
     }
 }
 
@@ -3509,6 +4010,10 @@ fn run_logout_command() -> Result<()> {
 
 fn run_whoami_command() -> Result<()> {
     auth::whoami()
+}
+
+fn run_qr_command(yes: bool) -> Result<()> {
+    auth::show_qr(yes)
 }
 
 fn run_delete_data_command() -> Result<()> {
@@ -3813,6 +4318,92 @@ fn prompt_star_repo(username: &str) -> Result<()> {
 }
 
 #[allow(clippy::too_many_arguments)]
+fn run_time_metrics_report(
+    json: bool,
+    home_dir: Option<String>,
+    clients: Option<Vec<String>>,
+    since: Option<String>,
+    until: Option<String>,
+    year: Option<String>,
+    no_spinner: bool,
+) -> Result<()> {
+    use tokio::runtime::Runtime;
+    use tokscale_core::{get_time_metrics_report, GroupBy, ReportOptions};
+
+    let spinner = if no_spinner {
+        None
+    } else {
+        Some(LightSpinner::start("Computing time metrics..."))
+    };
+    let use_env_roots = use_env_roots(&home_dir);
+    let rt = Runtime::new()?;
+    let report = rt
+        .block_on(async {
+            get_time_metrics_report(ReportOptions {
+                home_dir,
+                use_env_roots,
+                clients,
+                since,
+                until,
+                year,
+                group_by: GroupBy::default(),
+                scanner_settings: tui::settings::load_scanner_settings(),
+            })
+            .await
+        })
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    if let Some(spinner) = spinner {
+        spinner.stop();
+    }
+
+    let m = &report.metrics;
+
+    if json {
+        let output = serde_json::to_string_pretty(&report).unwrap_or_default();
+        println!("{}", output);
+    } else {
+        println!("Session Time Metrics");
+        println!("====================");
+        println!(
+            "Total active time:       {}",
+            format_duration_ms(m.total_active_time_ms)
+        );
+        println!(
+            "Total wall-clock time:   {}",
+            format_duration_ms(m.total_wall_time_ms)
+        );
+        println!(
+            "Longest continuous use:  {}",
+            format_duration_ms(m.longest_continuous_ms)
+        );
+        println!("Max concurrent sessions: {}", m.max_concurrent_sessions);
+        println!("Total sessions:          {}", m.session_count);
+        println!("Processing time:         {}ms", report.processing_time_ms);
+    }
+
+    Ok(())
+}
+
+fn format_duration_ms(ms: i64) -> String {
+    if ms <= 0 {
+        return "0s".to_string();
+    }
+    let total_secs = ms / 1000;
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let secs = total_secs % 60;
+
+    if hours > 0 {
+        format!("{}h {}m {}s", hours, minutes, secs)
+    } else if minutes > 0 {
+        format!("{}m {}s", minutes, secs)
+    } else {
+        format!("{}s", secs)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run_graph_command(
     output: Option<String>,
     home_dir: Option<String>,
@@ -3867,7 +4458,7 @@ fn run_graph_command(
         .map_err(|e| anyhow::anyhow!(e))?;
 
     let processing_time_ms = start.elapsed().as_millis() as u32;
-    let output_data = to_ts_token_contribution_data(&graph_result);
+    let output_data = to_ts_token_contribution_data(&graph_result, None);
     let json_output = serde_json::to_string_pretty(&output_data)?;
 
     if let Some(output_path) = output {
@@ -4109,7 +4700,8 @@ fn run_submit_command(
 
     let api_url = auth::get_api_base_url();
 
-    let submit_payload = to_ts_token_contribution_data(&graph_result);
+    let submit_device = device::resolve_submit_device()?;
+    let submit_payload = to_ts_token_contribution_data(&graph_result, Some(&submit_device));
 
     let response = rt.block_on(async {
         reqwest::Client::new()
@@ -4405,6 +4997,149 @@ fn run_antigravity_command(subcommand: AntigravitySubcommand) -> Result<()> {
     }
 }
 
+/// Parse `--variant` into a typed value.
+///
+/// Returns:
+/// - `Ok(Some(v))` when a recognized value was provided
+/// - `Ok(None)` when the flag was omitted entirely
+/// - `Err` when an unrecognized value was provided
+///
+/// The earlier version returned `Option<_>` and merged the "unrecognized" and
+/// "omitted" cases, which let callers silently fall through to "all variants"
+/// when the user typed something like `--variant slo` — they got every variant
+/// touched instead of an error.
+fn parse_variant_arg(arg: Option<&str>) -> Result<Option<trae::auth::TraeVariant>> {
+    match arg {
+        Some("solo") => Ok(Some(trae::auth::TraeVariant::Solo)),
+        Some("ide") => Ok(Some(trae::auth::TraeVariant::Ide)),
+        Some(other) => anyhow::bail!("unknown variant: {other}, valid values: solo, ide"),
+        None => Ok(None),
+    }
+}
+
+fn run_trae_command(subcommand: TraeSubcommand) -> Result<()> {
+    use colored::Colorize;
+    let rt = tokio::runtime::Runtime::new()?;
+
+    match subcommand {
+        TraeSubcommand::Login { manual, variant } => {
+            if manual {
+                use std::io::{self, Write};
+                // Default to international Solo when `--variant` is omitted.
+                let selected =
+                    parse_variant_arg(variant.as_deref())?.unwrap_or(trae::auth::TraeVariant::Solo);
+                println!();
+                println!("  {}", "Trae Manual Token Login".cyan());
+                println!(
+                    "  {}",
+                    "Paste your JWT access token from the browser DevTools:".bright_black()
+                );
+                println!(
+                    "  {}",
+                    "1. Open https://www.trae.ai/account-setting#usage".bright_black()
+                );
+                println!(
+                    "  {}",
+                    "2. F12 → Network → filter 'query_user_usage' → copy Authorization value"
+                        .bright_black()
+                );
+                print!("  Token: ");
+                io::stdout().flush()?;
+                let mut token = String::new();
+                io::stdin().read_line(&mut token)?;
+                let token = token.trim().to_string();
+                if token.is_empty() {
+                    anyhow::bail!("token must not be empty");
+                }
+                trae::auth::save_manual_token(selected, token, None)?;
+                println!(
+                    "\n  {}",
+                    format!("Token saved for {}", selected.client_str()).green()
+                );
+            } else {
+                let variants: Vec<trae::auth::TraeVariant> =
+                    match parse_variant_arg(variant.as_deref())? {
+                        Some(v) => vec![v],
+                        None => trae::auth::all_variants().to_vec(),
+                    };
+
+                let mut any_success = false;
+                for v in variants {
+                    match rt.block_on(trae::auth::resolve_token(v)) {
+                        Ok(_) => {
+                            println!("  {} logged in (auto-detected)", v.client_str().green());
+                            any_success = true;
+                        }
+                        Err(e) => {
+                            println!("  {} auto-login failed: {}", v.client_str().yellow(), e);
+                        }
+                    }
+                }
+                if !any_success {
+                    println!(
+                        "  {}",
+                        "No Trae credentials found. Use --manual to paste a token by hand."
+                            .yellow()
+                    );
+                }
+            }
+            Ok(())
+        }
+        TraeSubcommand::Logout { variant } => {
+            let variants: Vec<trae::auth::TraeVariant> =
+                match parse_variant_arg(variant.as_deref())? {
+                    Some(v) => vec![v],
+                    None => trae::auth::all_variants().to_vec(),
+                };
+            for v in variants {
+                trae::auth::logout(v)?;
+                println!("  {} logged out", v.client_str().green());
+            }
+            Ok(())
+        }
+        TraeSubcommand::Status { json } => {
+            let mut status = serde_json::Map::new();
+            for v in trae::auth::all_variants() {
+                let has = trae::auth::has_credentials(v);
+                if json {
+                    status.insert(v.client_str().to_string(), serde_json::Value::Bool(has));
+                } else {
+                    println!(
+                        "  {}: {}",
+                        v.client_str(),
+                        if has {
+                            "authenticated".green()
+                        } else {
+                            "not authenticated".yellow()
+                        }
+                    );
+                }
+            }
+            if json {
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            }
+            Ok(())
+        }
+        TraeSubcommand::Sync { since, include_aux } => {
+            let days = since.unwrap_or(30);
+            // Negative `days` would compute `now - (negative * 86400)` → a
+            // future `start_time`, and zero collapses the query window to an
+            // empty range. Reject both at the CLI boundary instead of
+            // forwarding garbage to the sync layer.
+            if days <= 0 {
+                anyhow::bail!("--since must be a positive number of days (got {days})");
+            }
+            // Trae IDE and Trae Solo share account-level usage data, so we
+            // always sync once using whichever credential source is available.
+            let variants: Vec<trae::auth::TraeVariant> = trae::auth::all_variants()
+                .into_iter()
+                .filter(|v| trae::auth::has_credentials(*v))
+                .collect();
+            rt.block_on(trae::sync::run_trae_sync(&variants, days, include_aux))
+        }
+    }
+}
+
 fn format_tokens_with_commas(n: i64) -> String {
     let s = n.to_string();
     let bytes = s.as_bytes();
@@ -4600,6 +5335,112 @@ mod tests {
     use super::*;
     use clap::Parser;
     use reqwest::StatusCode;
+    use tokscale_core::{
+        calculate_summary, calculate_years, ClientContribution, DailyContribution, DailyTotals,
+        GraphMeta, GraphResult, TokenBreakdown, YearSummary,
+    };
+
+    #[test]
+    fn test_parse_variant_arg_accepts_known_values() {
+        assert_eq!(
+            parse_variant_arg(Some("solo")).unwrap(),
+            Some(trae::auth::TraeVariant::Solo)
+        );
+        assert_eq!(
+            parse_variant_arg(Some("ide")).unwrap(),
+            Some(trae::auth::TraeVariant::Ide)
+        );
+    }
+
+    #[test]
+    fn test_parse_variant_arg_none_when_omitted() {
+        assert_eq!(parse_variant_arg(None).unwrap(), None);
+    }
+
+    #[test]
+    fn test_parse_variant_arg_rejects_unknown_value() {
+        // The earlier `Option`-returning version converted this to `None`
+        // and the caller fell through to "all variants" — a typo like
+        // `--variant slo` would log out every variant. Now we error out.
+        let err = parse_variant_arg(Some("slo")).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("unknown variant"), "got: {msg}");
+        assert!(msg.contains("slo"), "got: {msg}");
+    }
+
+    #[test]
+    fn test_parse_variant_arg_rejects_empty_string() {
+        assert!(parse_variant_arg(Some("")).is_err());
+    }
+
+    fn token_breakdown(total_tokens: i64) -> TokenBreakdown {
+        TokenBreakdown {
+            input: total_tokens,
+            output: 0,
+            cache_read: 0,
+            cache_write: 0,
+            reasoning: 0,
+        }
+    }
+
+    fn daily_contribution(
+        date: &str,
+        total_tokens: i64,
+        total_cost: f64,
+        client: &str,
+        model_id: &str,
+    ) -> DailyContribution {
+        DailyContribution {
+            date: date.to_string(),
+            totals: DailyTotals {
+                tokens: total_tokens,
+                cost: total_cost,
+                messages: 1,
+            },
+            intensity: 0,
+            token_breakdown: token_breakdown(total_tokens),
+            clients: vec![ClientContribution {
+                client: client.to_string(),
+                model_id: model_id.to_string(),
+                provider_id: "openai".to_string(),
+                tokens: token_breakdown(total_tokens),
+                cost: total_cost,
+                messages: 1,
+            }],
+            active_time_ms: None,
+        }
+    }
+
+    fn graph_result_with_contributions(contributions: Vec<DailyContribution>) -> GraphResult {
+        GraphResult {
+            meta: GraphMeta {
+                generated_at: "2026-03-24T00:00:00Z".to_string(),
+                version: "test".to_string(),
+                date_range_start: contributions
+                    .first()
+                    .map(|c| c.date.clone())
+                    .unwrap_or_default(),
+                date_range_end: contributions
+                    .last()
+                    .map(|c| c.date.clone())
+                    .unwrap_or_default(),
+                processing_time_ms: 0,
+            },
+            summary: calculate_summary(&contributions),
+            years: calculate_years(&contributions),
+            contributions,
+            time_metrics: None,
+        }
+    }
+
+    fn year_summary(graph: &GraphResult, year: &str) -> YearSummary {
+        graph
+            .years
+            .iter()
+            .find(|entry| entry.year == year)
+            .cloned()
+            .unwrap()
+    }
 
     // Tests below call `build_client_filter_with_defaults` directly with
     // an explicit `defaults` slice instead of `build_client_filter`, which
@@ -4686,6 +5527,8 @@ mod tests {
             antigravity: true,
             zed: true,
             anthropic_api: true,
+            kiro: true,
+            trae: true,
             synthetic: true,
             ..ClientFlags::default()
         };
@@ -4719,6 +5562,8 @@ mod tests {
             "antigravity",
             "zed",
             "anthropic-api",
+            "kiro",
+            "trae",
             "synthetic",
         ] {
             assert!(
@@ -5054,6 +5899,56 @@ mod tests {
             cli.clients.clients,
             vec![ClientFilter::Opencode, ClientFilter::Claude]
         );
+    }
+
+    #[test]
+    fn test_wrapped_parses_clients_view_flag() {
+        let cli = Cli::try_parse_from(["tokscale", "wrapped"]).expect("parse ok");
+        let Some(Commands::Wrapped {
+            show_clients,
+            agents,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected wrapped command");
+        };
+        assert!(!show_clients);
+        assert!(!agents);
+
+        let cli = Cli::try_parse_from(["tokscale", "wrapped", "--clients"]).expect("parse ok");
+        let Some(Commands::Wrapped { show_clients, .. }) = cli.command else {
+            panic!("expected wrapped command");
+        };
+        assert!(show_clients);
+    }
+
+    #[test]
+    fn test_wrapped_client_filter_coexists_with_clients_view_flag() {
+        let cli =
+            Cli::try_parse_from(["tokscale", "wrapped", "--client", "opencode"]).expect("parse ok");
+        let Some(Commands::Wrapped {
+            client_flags,
+            show_clients,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected wrapped command");
+        };
+        assert_eq!(client_flags.clients, vec![ClientFilter::Opencode]);
+        assert!(!show_clients);
+
+        let cli = Cli::try_parse_from(["tokscale", "wrapped", "--clients", "--client", "opencode"])
+            .expect("parse ok");
+        let Some(Commands::Wrapped {
+            client_flags,
+            show_clients,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected wrapped command");
+        };
+        assert_eq!(client_flags.clients, vec![ClientFilter::Opencode]);
+        assert!(show_clients);
     }
 
     #[test]
@@ -5541,6 +6436,29 @@ mod tests {
         let (position2, forward2) = LightSpinner::scanner_state(54);
         assert_eq!(position1, position2);
         assert_eq!(forward1, forward2);
+    }
+
+    #[test]
+    fn test_submit_payload_includes_device_when_provided() {
+        let graph = graph_result_with_contributions(vec![daily_contribution(
+            "2026-12-31",
+            20,
+            2.50,
+            "codex",
+            "model-b",
+        )]);
+        let device = device::SubmitDevice {
+            id: "dev_test".to_string(),
+            name: Some("Test device".to_string()),
+        };
+
+        let payload = to_ts_token_contribution_data(&graph, Some(&device));
+
+        assert_eq!(payload.device.as_ref().unwrap().id, "dev_test");
+        assert_eq!(
+            payload.device.as_ref().unwrap().name.as_deref(),
+            Some("Test device")
+        );
     }
 
     #[test]

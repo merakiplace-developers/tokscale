@@ -23,10 +23,10 @@ const mockStats: UserEmbedStats = {
 
 const mockContributions: EmbedContributionDay[] = [
   { date: "2026-01-15", intensity: 0, totalTokens: 0, totalCost: 0 },
-  { date: "2026-02-10", intensity: 2, totalTokens: 50000, totalCost: 1.5 },
-  { date: "2026-02-20", intensity: 4, totalTokens: 200000, totalCost: 6 },
-  { date: "2026-03-01", intensity: 1, totalTokens: 10000, totalCost: 0.3 },
-  { date: "2026-03-10", intensity: 3, totalTokens: 100000, totalCost: 3 },
+  { date: "2026-02-10", intensity: 2, totalTokens: 50_000, totalCost: 1.5 },
+  { date: "2026-02-20", intensity: 4, totalTokens: 500_000, totalCost: 12.0 },
+  { date: "2026-03-01", intensity: 1, totalTokens: 10_000, totalCost: 0.4 },
+  { date: "2026-03-10", intensity: 3, totalTokens: 150_000, totalCost: 5.0 },
 ];
 
 describe("renderIsometric3DEmbedSvg", () => {

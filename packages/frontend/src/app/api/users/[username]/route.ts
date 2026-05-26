@@ -62,6 +62,8 @@ export async function GET(_request: Request, { params }: RouteParams) {
           submissionCount: sql<number>`COALESCE(MAX(${submissions.submitCount}), 0)`,
           earliestDate: sql<string>`MIN(${submissions.dateStart})`,
           latestDate: sql<string>`MAX(${submissions.dateEnd})`,
+          totalActiveTimeMs: sql<number>`COALESCE(SUM(${submissions.totalActiveTimeMs}), 0)`,
+          sessionCount: sql<number>`COALESCE(SUM(${submissions.sessionCount}), 0)`,
         })
         .from(submissions)
         .where(eq(submissions.userId, user.id)),
@@ -105,7 +107,6 @@ export async function GET(_request: Request, { params }: RouteParams) {
           inputTokens: dailyBreakdown.inputTokens,
           outputTokens: dailyBreakdown.outputTokens,
           sourceBreakdown: dailyBreakdown.sourceBreakdown,
-          modelBreakdown: dailyBreakdown.modelBreakdown,
         })
         .from(dailyBreakdown)
         .innerJoin(submissions, eq(dailyBreakdown.submissionId, submissions.id))
@@ -443,6 +444,8 @@ export async function GET(_request: Request, { params }: RouteParams) {
         reasoningTokens: Number(stats?.reasoningTokens) || 0,
         submissionCount: Number(stats?.submissionCount) || 0,
         activeDays,
+        totalActiveTimeMs: Number(stats?.totalActiveTimeMs) || 0,
+        sessionCount: Number(stats?.sessionCount) || 0,
       },
       dateRange: {
         start: stats?.earliestDate || null,

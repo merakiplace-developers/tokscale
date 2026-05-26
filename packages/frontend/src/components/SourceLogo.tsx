@@ -65,6 +65,8 @@ export function SourceLogo({ sourceId, height = 14, className = "" }: SourceLogo
         return "/assets/logos/codebuff.png";
       case "antigravity":
         return "/assets/logos/antigravity.png";
+      case "kiro":
+        return "/assets/logos/kiro.ico";
       case "zed":
         return "/assets/logos/zed.webp";
       case "anthropic-api":

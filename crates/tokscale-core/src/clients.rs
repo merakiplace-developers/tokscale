@@ -56,8 +56,12 @@ impl PathRoot {
                 fallback_relative,
             } => {
                 if use_env_roots {
-                    std::env::var(var)
-                        .unwrap_or_else(|_| format!("{}/{}", home_dir, fallback_relative))
+                    let val = std::env::var(var).unwrap_or_default();
+                    if val.trim().is_empty() {
+                        format!("{}/{}", home_dir, fallback_relative)
+                    } else {
+                        val
+                    }
                 } else {
                     format!("{}/{}", home_dir, fallback_relative)
                 }
@@ -206,8 +210,11 @@ define_clients!(
     },
     Gemini = 4 => {
         id: "gemini",
-        root: PathRoot::Home,
-        relative: ".gemini/tmp",
+        root: PathRoot::EnvVar {
+            var: "GEMINI_CLI_HOME",
+            fallback_relative: ".gemini",
+        },
+        relative: "tmp",
         pattern: "*.json|*.jsonl",
         headless: false,
         parse_local: true,
@@ -380,6 +387,24 @@ define_clients!(
         headless: false,
         parse_local: false,
         submit_default: true
+    },
+    Kiro = 23 => {
+        id: "kiro",
+        root: PathRoot::Home,
+        relative: ".kiro/sessions/cli",
+        pattern: "*.json",
+        headless: false,
+        parse_local: true,
+        submit_default: true
+    },
+    Trae = 24 => {
+        id: "trae",
+        root: PathRoot::Config,
+        relative: "trae-cache/sessions",
+        pattern: "*.json",
+        headless: false,
+        parse_local: true,
+        submit_default: false
     }
 );
 
@@ -432,7 +457,7 @@ mod tests {
 
     #[test]
     fn test_client_id_count() {
-        assert_eq!(ClientId::COUNT, 23);
+        assert_eq!(ClientId::COUNT, 25);
     }
 
     #[test]
@@ -719,5 +744,17 @@ mod tests {
     #[test]
     fn test_zed_submit_default_is_true() {
         assert!(ClientId::Zed.submit_default());
+    }
+
+    #[test]
+    fn test_kiro_data_dir_path() {
+        assert_eq!(
+            ClientId::Kiro.data().resolve_path("/tmp/home"),
+            "/tmp/home/.kiro/sessions/cli"
+        );
+        assert_eq!(ClientId::Kiro.data().pattern, "*.json");
+        assert!(ClientId::Kiro.parse_local());
+        assert!(ClientId::Kiro.submit_default());
+        assert!(!ClientId::Kiro.supports_headless());
     }
 }

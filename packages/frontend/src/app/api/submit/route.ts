@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
-import { db, apiTokens, submissions, dailyBreakdown } from "@/lib/db";
-import { eq, sql } from "drizzle-orm";
+import { db, apiTokens, submissions, submittedDevices, dailyBreakdown } from "@/lib/db";
+import { and, eq, sql } from "drizzle-orm";
 import {
   validateSubmission,
   generateSubmissionHash,
@@ -11,7 +11,6 @@ import { authenticatePersonalToken } from "@/lib/auth/personalTokens";
 import { getBearerToken } from "../../../lib/auth/bearerToken";
 import {
   recalculateDayTotals,
-  buildModelBreakdown,
   clientContributionToBreakdownData,
   mergeTimestampMs,
   aggregateDeviceContributions,
@@ -20,6 +19,10 @@ import {
   type DeviceContributions,
 } from "@/lib/db/helpers";
 import { normalizeUsernameCacheKey, revalidateUsernamePaths } from "@/lib/db/usernameLookup";
+import { revalidateUserGroupLeaderboards } from "@/lib/groups/cache";
+
+const LEGACY_SUBMIT_DEVICE_KEY = "legacy-default";
+const LEGACY_SUBMIT_DEVICE_NAME = "Legacy submissions";
 
 function normalizeSubmissionData(data: unknown): void {
   if (!data || typeof data !== "object") return;
@@ -47,6 +50,29 @@ function normalizeSubmissionData(data: unknown): void {
       }
     }
   }
+}
+
+// Submission schema versions:
+//   0 = legacy CLI: no per-day timestamps, no device metadata.
+//   1 = timestamp-aware CLI (>=v2.1): per-day `timestampMs` set, still no device.
+//   2 = device-aware CLI (>=v2.1.x post-#517): caller sends a `device` object,
+//       so daily_breakdown rows are keyed by submittedDeviceId.
+// The submissions row keeps the GREATEST() of stored vs. incoming so a single
+// device-aware submit cannot regress an account back to v1 hash semantics.
+function getSubmitDevice(data: SubmissionData): { key: string; name: string | null; schemaVersion: number } {
+  if (data.device) {
+    return {
+      key: data.device.id,
+      name: data.device.name ?? null,
+      schemaVersion: 2,
+    };
+  }
+
+  return {
+    key: LEGACY_SUBMIT_DEVICE_KEY,
+    name: LEGACY_SUBMIT_DEVICE_NAME,
+    schemaVersion: data.contributions.some((c) => c.timestampMs != null) ? 1 : 0,
+  };
 }
 
 /**
@@ -178,7 +204,6 @@ export async function POST(request: Request) {
             dateEnd: data.meta.dateRange.end,
             sourcesUsed: [],
             modelsUsed: [],
-            status: "verified",
             cliVersion: data.meta.version,
             submissionHash: generateSubmissionHash(hashData),
           })
@@ -186,6 +211,27 @@ export async function POST(request: Request) {
 
         submissionId = newSubmission.id;
       }
+
+      const submitDevice = getSubmitDevice(data);
+      const submittedAt = new Date();
+      const [submittedDevice] = await tx
+        .insert(submittedDevices)
+        .values({
+          userId: tokenRecord.userId,
+          deviceKey: submitDevice.key,
+          displayName: submitDevice.name,
+          lastSubmittedAt: submittedAt,
+          updatedAt: submittedAt,
+        })
+        .onConflictDoUpdate({
+          target: [submittedDevices.userId, submittedDevices.deviceKey],
+          set: {
+            displayName: sql`COALESCE(EXCLUDED.display_name, ${submittedDevices.displayName})`,
+            lastSubmittedAt: submittedAt,
+            updatedAt: submittedAt,
+          },
+        })
+        .returning({ id: submittedDevices.id });
 
       // ------------------------------------------
       // STEP 3b: Fetch existing daily breakdown for merge
@@ -195,11 +241,17 @@ export async function POST(request: Request) {
           id: dailyBreakdown.id,
           date: dailyBreakdown.date,
           timestampMs: dailyBreakdown.timestampMs,
+          activeTimeMs: dailyBreakdown.activeTimeMs,
           sourceBreakdown: dailyBreakdown.sourceBreakdown,
           deviceContributions: dailyBreakdown.deviceContributions,
         })
         .from(dailyBreakdown)
-        .where(eq(dailyBreakdown.submissionId, submissionId))
+        .where(
+          and(
+            eq(dailyBreakdown.submissionId, submissionId),
+            eq(dailyBreakdown.submittedDeviceId, submittedDevice.id)
+          )
+        )
         .for('update');
 
       const existingDaysMap = new Map(
@@ -211,12 +263,14 @@ export async function POST(request: Request) {
       // ------------------------------------------
       const toInsert: Array<{
         submissionId: string;
+        submittedDeviceId: string;
         date: string;
         tokens: number;
         cost: string;
         inputTokens: number;
         outputTokens: number;
         timestampMs: number | null;
+        activeTimeMs: number | null;
         sourceBreakdown: Record<string, ClientBreakdownData>;
         modelBreakdown: Record<string, number>;
         deviceContributions: DeviceContributions;
@@ -229,6 +283,7 @@ export async function POST(request: Request) {
         inputTokens: number;
         outputTokens: number;
         timestampMs: number | null;
+        activeTimeMs: number | null;
         sourceBreakdown: Record<string, ClientBreakdownData>;
         modelBreakdown: Record<string, number>;
         deviceContributions: DeviceContributions;
@@ -287,7 +342,6 @@ export async function POST(request: Request) {
           // Aggregate across all devices
           const mergedClientBreakdown = aggregateDeviceContributions(devContribs);
           const dayTotals = recalculateDayTotals(mergedClientBreakdown);
-          const modelBreakdown = buildModelBreakdown(mergedClientBreakdown);
 
           toUpdate.push({
             id: existingDay.id,
@@ -296,13 +350,13 @@ export async function POST(request: Request) {
             inputTokens: dayTotals.inputTokens,
             outputTokens: dayTotals.outputTokens,
             timestampMs: mergeTimestampMs(existingDay.timestampMs, incomingDay.timestampMs ?? null),
+            activeTimeMs: incomingDay.activeTimeMs ?? existingDay.activeTimeMs ?? null,
             sourceBreakdown: mergedClientBreakdown,
             modelBreakdown,
             deviceContributions: devContribs,
           });
         } else {
           const dayTotals = recalculateDayTotals(incomingClientBreakdown);
-          const modelBreakdown = buildModelBreakdown(incomingClientBreakdown);
 
           const devContribs: DeviceContributions = {
             [deviceKey]: { ...incomingClientBreakdown },
@@ -310,12 +364,14 @@ export async function POST(request: Request) {
 
           toInsert.push({
             submissionId,
+            submittedDeviceId: submittedDevice.id,
             date: incomingDay.date,
             tokens: dayTotals.tokens,
             cost: dayTotals.cost.toFixed(4),
             inputTokens: dayTotals.inputTokens,
             outputTokens: dayTotals.outputTokens,
             timestampMs: incomingDay.timestampMs ?? null,
+            activeTimeMs: incomingDay.activeTimeMs ?? null,
             sourceBreakdown: incomingClientBreakdown,
             modelBreakdown,
             deviceContributions: devContribs,
@@ -332,7 +388,7 @@ export async function POST(request: Request) {
       if (toUpdate.length > 0) {
         const valuesClauses = toUpdate.map(
           (row) =>
-            sql`(${row.id}::uuid, ${row.tokens}::bigint, ${row.cost}::numeric(10,4), ${row.inputTokens}::bigint, ${row.outputTokens}::bigint, ${row.timestampMs}::bigint, ${JSON.stringify(row.sourceBreakdown)}::jsonb, ${JSON.stringify(row.modelBreakdown)}::jsonb, ${JSON.stringify(row.deviceContributions)}::jsonb)`
+            sql`(${row.id}::uuid, ${row.tokens}::bigint, ${row.cost}::numeric(10,4), ${row.inputTokens}::bigint, ${row.outputTokens}::bigint, ${row.timestampMs}::bigint, ${row.activeTimeMs}::bigint, ${JSON.stringify(row.sourceBreakdown)}::jsonb, ${JSON.stringify(row.modelBreakdown)}::jsonb, ${JSON.stringify(row.deviceContributions)}::jsonb)`
         );
 
         const valuesList = sql.join(valuesClauses, sql`, `);
@@ -344,11 +400,12 @@ export async function POST(request: Request) {
             input_tokens = batch.input_tokens,
             output_tokens = batch.output_tokens,
             timestamp_ms = batch.timestamp_ms,
+            active_time_ms = batch.active_time_ms,
             source_breakdown = batch.source_breakdown,
             model_breakdown = batch.model_breakdown,
             device_contributions = batch.device_contributions
           FROM (VALUES ${valuesList})
-            AS batch(id, tokens, cost, input_tokens, output_tokens, timestamp_ms, source_breakdown, model_breakdown, device_contributions)
+            AS batch(id, tokens, cost, input_tokens, output_tokens, timestamp_ms, active_time_ms, source_breakdown, model_breakdown, device_contributions)
           WHERE d.id = batch.id
         `);
       }
@@ -364,7 +421,7 @@ export async function POST(request: Request) {
           outputTokens: sql<number>`COALESCE(SUM(${dailyBreakdown.outputTokens}), 0)::bigint`,
           dateStart: sql<string>`MIN(${dailyBreakdown.date})`,
           dateEnd: sql<string>`MAX(${dailyBreakdown.date})`,
-          activeDays: sql<number>`COUNT(CASE WHEN ${dailyBreakdown.tokens} > 0 THEN 1 END)::int`,
+          activeDays: sql<number>`COUNT(DISTINCT CASE WHEN ${dailyBreakdown.tokens} > 0 THEN ${dailyBreakdown.date} END)::int`,
           rowCount: sql<number>`COUNT(*)::int`,
         })
         .from(dailyBreakdown)
@@ -423,7 +480,13 @@ export async function POST(request: Request) {
           cliVersion: data.meta.version,
           submissionHash: generateSubmissionHash(hashData),
           submitCount: sql`COALESCE(submit_count, 0) + 1`,
-          schemaVersion: sql`GREATEST(COALESCE(${submissions.schemaVersion}, 0), ${data.contributions.some((c) => c.timestampMs != null) ? 1 : 0})`,
+          schemaVersion: sql`GREATEST(COALESCE(${submissions.schemaVersion}, 0), ${submitDevice.schemaVersion})`,
+          ...(data.timeMetrics ? {
+            totalActiveTimeMs: data.timeMetrics.totalActiveTimeMs,
+            longestContinuousMs: data.timeMetrics.longestContinuousMs,
+            maxConcurrentSessions: data.timeMetrics.maxConcurrentSessions,
+            sessionCount: data.timeMetrics.sessionCount,
+          } : {}),
           updatedAt: new Date(),
         })
         .where(eq(submissions.id, submissionId));
@@ -444,16 +507,26 @@ export async function POST(request: Request) {
       };
     });
 
+    const usernameCacheKey = normalizeUsernameCacheKey(tokenRecord.username);
     try {
-      const usernameCacheKey = normalizeUsernameCacheKey(tokenRecord.username);
-
       revalidateTag("leaderboard", "max");
       revalidateTag(`user:${usernameCacheKey}`, "max");
       revalidateTag("user-rank", "max");
       revalidateTag(`user-rank:${usernameCacheKey}`, "max");
+    } catch (e) {
+      console.error("Public cache invalidation failed:", e);
+    }
+
+    try {
+      await revalidateUserGroupLeaderboards(tokenRecord.userId);
+    } catch (e) {
+      console.error("Group leaderboard cache invalidation failed:", e);
+    }
+
+    try {
       revalidateUsernamePaths(tokenRecord.username);
     } catch (e) {
-      console.error("Cache invalidation failed:", e);
+      console.error("Username path revalidation failed:", e);
     }
 
     return NextResponse.json({

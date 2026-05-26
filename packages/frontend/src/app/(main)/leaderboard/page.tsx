@@ -4,14 +4,20 @@ import { redirect } from "next/navigation";
 import { Navigation } from "@/components/layout/Navigation";
 import { LeaderboardSkeleton } from "@/components/Skeleton";
 import { getLeaderboardData, getUserRank } from "@/lib/leaderboard/getLeaderboard";
-import type { LeaderboardData, SortBy } from "@/lib/leaderboard/types";
+import type { LeaderboardData, Period, SortBy } from "@/lib/leaderboard/types";
 import { getSession } from "@/lib/auth/session";
 import { SORT_BY_COOKIE_NAME, isValidSortBy } from "@/lib/leaderboard/constants";
+import { parseCustomDateRange } from "@/lib/leaderboard/dateRange";
+import { listPublicGroups, listUserGroups } from "@/lib/groups/queries";
+import LeaderboardClient from "./LeaderboardClient";
+import GroupsBrowser from "./GroupsBrowser";
+import ViewSelector, { type LeaderboardView } from "./ViewSelector";
 
 function isMissingDatabaseUrl(error: unknown): boolean {
   return error instanceof Error && error.message === "DATABASE_URL environment variable is not set";
 }
-import LeaderboardClient from "./LeaderboardClient";
+
+const VALID_PERIODS: Period[] = ["all", "month", "last-month", "week", "custom"];
 
 function createEmptyLeaderboardData(sortBy: SortBy): LeaderboardData {
   return {
@@ -27,6 +33,7 @@ function createEmptyLeaderboardData(sortBy: SortBy): LeaderboardData {
     stats: {
       totalTokens: 0,
       totalCost: 0,
+      totalActiveTimeMs: null,
       totalSubmissions: null,
       uniqueUsers: 0,
     },
@@ -37,7 +44,15 @@ function createEmptyLeaderboardData(sortBy: SortBy): LeaderboardData {
   };
 }
 
-export default async function LeaderboardPage() {
+function resolveView(raw: string | string[] | undefined): LeaderboardView {
+  return raw === "groups" ? "groups" : "users";
+}
+
+interface PageProps {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}
+
+export default async function LeaderboardPage({ searchParams }: PageProps) {
   const session = await getSession();
   if (!session) {
     redirect("/login?returnTo=/leaderboard");
@@ -55,20 +70,64 @@ export default async function LeaderboardPage() {
 
       <main className="main-container" style={{ paddingTop: 80 }}>
         <Suspense fallback={<LeaderboardSkeleton />}>
-          <LeaderboardWithPreferences />
+          <LeaderboardWithPreferences searchParams={searchParams} />
         </Suspense>
       </main>
     </div>
   );
 }
 
-async function LeaderboardWithPreferences() {
-  const cookieStore = await cookies();
+async function LeaderboardWithPreferences({
+  searchParams: searchParamsPromise,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const [cookieStore, searchParams] = await Promise.all([cookies(), searchParamsPromise]);
+  const view = resolveView(searchParams.view);
+
+  if (view === "groups") {
+    return (
+      <>
+        <ViewSelector current="groups" />
+        <GroupsView />
+      </>
+    );
+  }
+
   const sortByCookie = cookieStore.get(SORT_BY_COOKIE_NAME)?.value;
-  const sortBy: SortBy = isValidSortBy(sortByCookie) ? sortByCookie : "tokens";
+  const periodParam = typeof searchParams.period === "string" ? searchParams.period : null;
+  const pageParam =
+    typeof searchParams.page === "string" ? Math.max(1, Number(searchParams.page) || 1) : 1;
+  const sortByParam = typeof searchParams.sortBy === "string" ? searchParams.sortBy : null;
+  const fromParam = typeof searchParams.from === "string" ? searchParams.from : null;
+  const toParam = typeof searchParams.to === "string" ? searchParams.to : null;
+  const searchParam =
+    typeof searchParams.search === "string" ? searchParams.search.trim() : "";
+
+  const sortBy: SortBy =
+    sortByParam && isValidSortBy(sortByParam)
+      ? sortByParam
+      : isValidSortBy(sortByCookie)
+      ? sortByCookie
+      : "tokens";
+
+  let period: Period =
+    periodParam && VALID_PERIODS.includes(periodParam as Period)
+      ? (periodParam as Period)
+      : "all";
+
+  const customDateRange =
+    period === "custom" ? parseCustomDateRange(fromParam, toParam) : null;
+
+  if (period === "custom" && !customDateRange) {
+    period = "all";
+  }
+
+  const customFrom = customDateRange?.from;
+  const customTo = customDateRange?.to;
 
   const [initialData, session] = await Promise.all([
-    getLeaderboardData("all", 1, 50, sortBy).catch((error) => {
+    getLeaderboardData(period, pageParam, 50, sortBy, searchParam, customFrom, customTo).catch((error) => {
       if (isMissingDatabaseUrl(error)) {
         return createEmptyLeaderboardData(sortBy);
       }
@@ -83,7 +142,7 @@ async function LeaderboardWithPreferences() {
   ]);
 
   const initialUserRank = session
-    ? await getUserRank(session.username, "all", sortBy).catch((error) => {
+    ? await getUserRank(session.username, period, sortBy, customFrom, customTo).catch((error) => {
         if (isMissingDatabaseUrl(error)) {
           return null;
         }
@@ -92,11 +151,57 @@ async function LeaderboardWithPreferences() {
     : null;
 
   return (
-    <LeaderboardClient
-      initialData={initialData}
+    <>
+      <ViewSelector current="users" />
+      <LeaderboardClient
+        initialData={initialData}
+        currentUser={session}
+        initialSortBy={sortBy}
+        initialUserRank={initialUserRank}
+      />
+    </>
+  );
+}
+
+async function GroupsView() {
+  const emptyPagination = {
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 0,
+    hasNext: false,
+    hasPrev: false,
+  } as const;
+
+  const session = await getSession().catch((error) => {
+    if (isMissingDatabaseUrl(error)) return null;
+    throw error;
+  });
+
+  const [publicGroups, myGroups] = await Promise.all([
+    listPublicGroups(1, 20).catch((error) => {
+      if (isMissingDatabaseUrl(error)) {
+        return { groups: [], pagination: emptyPagination };
+      }
+      throw error;
+    }),
+    session
+      ? listUserGroups(session.id, 1, 20).catch((error) => {
+          if (isMissingDatabaseUrl(error)) {
+            return { groups: [], pagination: emptyPagination };
+          }
+          throw error;
+        })
+      : Promise.resolve(null),
+  ]);
+
+  return (
+    <GroupsBrowser
       currentUser={session}
-      initialSortBy={sortBy}
-      initialUserRank={initialUserRank}
+      initialPublicGroups={publicGroups.groups}
+      initialMyGroups={myGroups?.groups ?? []}
+      initialPublicPagination={publicGroups.pagination}
+      initialMyPagination={myGroups?.pagination ?? emptyPagination}
     />
   );
 }

@@ -60,7 +60,7 @@
 | <img width="48px" src=".github/assets/client-openai.jpg" alt="Codex" /> | [Codex CLI](https://github.com/openai/codex) | `~/.codex/sessions/` | ✅ 支持 |
 | <img width="48px" src=".github/assets/client-copilot.jpg" alt="Copilot" /> | [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-the-github-copilot-coding-agent-in-cli) | `~/.copilot/otel/*.jsonl` (+ `COPILOT_OTEL_FILE_EXPORTER_PATH`) | ✅ 支持 |
 | <img width="48px" src=".github/assets/client-hermes.png" alt="Hermes Agent" /> | [Hermes Agent](https://github.com/NousResearch/hermes-agent) | `$HERMES_HOME/state.db`（回退：`~/.hermes/state.db`） | ✅ 支持 |
-| <img width="48px" src=".github/assets/client-gemini.png" alt="Gemini" /> | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `~/.gemini/tmp/*/chats/*.json` | ✅ 支持 |
+| <img width="48px" src=".github/assets/client-gemini.png" alt="Gemini" /> | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `$GEMINI_CLI_HOME/tmp/*/chats/*.json`（回退：`~/.gemini/tmp/*/chats/*.json`） | ✅ 支持 |
 | <img width="48px" src=".github/assets/client-cursor.jpg" alt="Cursor" /> | [Cursor IDE](https://cursor.com/) | 通过 `~/.config/tokscale/cursor-cache/` API 同步 | ✅ 支持 |
 | <img width="48px" src=".github/assets/client-amp.png" alt="Amp" /> | [Amp (AmpCode)](https://ampcode.com/) | `~/.local/share/amp/threads/` | ✅ 支持 |
 | <img width="48px" src=".github/assets/client-codebuff.png" alt="Codebuff" /> | [Codebuff](https://codebuff.com/) | `~/.config/manicode/`（+ `manicode-dev`、`manicode-staging`；可通过 `CODEBUFF_DATA_DIR` 覆盖） | ✅ 支持 |
@@ -75,6 +75,9 @@
 | <img width="48px" src=".github/assets/client-crush.png" alt="Crush" /> | [Crush](https://crush.ai/) | `$XDG_DATA_HOME/crush/projects.json`（项目注册表；回退路径：`~/.local/share/crush/projects.json`） | ✅ 支持 |
 | <img width="48px" src=".github/assets/client-goose.png" alt="Goose" /> | [Goose](https://github.com/aaif-goose/goose) | `~/.local/share/goose/sessions/sessions.db`（+ macOS Application Support、旧版 Block/goose 路径；可通过 `GOOSE_PATH_ROOT` 覆盖） | ✅ 支持 |
 | <img width="48px" src=".github/assets/client-antigravity.png" alt="Antigravity" /> | [Google Antigravity](https://antigravity.google/) | 通过 `tokscale antigravity sync` 缓存到 `~/.config/tokscale/antigravity-cache/sessions/*.jsonl`（使用本地语言服务器 RPC） | ✅ 支持 |
+| <img width="48px" src=".github/assets/client-trae.png" alt="Trae" /> | [Trae IDE](https://www.trae.ai/) / [Trae Solo](https://www.trae.ai/solo)（国际版） | 通过 `tokscale trae sync` 缓存到 `~/.config/tokscale/trae-cache/sessions/*.json`（来自官方 API 的账号级使用量） | ✅ 支持 |
+| <img width="48px" src=".github/assets/client-zed.webp" alt="Zed Agent" /> | [Zed Agent](https://zed.dev/docs/ai/agent-panel) | `~/.local/share/zed/threads/threads.db`（macOS: `~/Library/Application Support/Zed/threads/threads.db`；Windows: `%LOCALAPPDATA%/Zed/threads/threads.db`；仅限托管 Zed 模型，不含外部 ACP 代理） | ✅ 支持 |
+| Kiro | Kiro | `~/.kiro/sessions/cli/*.json`（+ `*.jsonl`）和 `~/.local/share/kiro-cli/data.sqlite3`（macOS: `~/Library/Application Support/kiro-cli/data.sqlite3`） | ✅ 支持 |
 | <img width="48px" src=".github/assets/client-synthetic.png" alt="Synthetic" /> | [Synthetic](https://synthetic.new/) | 通过 `hf:` 模型前缀或 `synthetic` provider 从其他来源重归属（+ [Octofriend](https://github.com/synthetic-lab/octofriend): `~/.local/share/octofriend/sqlite.db`） | ✅ 支持 |
 
 使用 [🚅 LiteLLM 的价格数据](https://github.com/BerriAI/litellm)提供实时价格计算，支持分层定价模型和缓存 Token 折扣。
@@ -104,6 +107,7 @@
   - [社交平台命令](#社交平台命令)
   - [Cursor IDE 命令](#cursor-ide-命令)
   - [Antigravity 命令](#antigravity-命令)
+  - [Trae 命令](#trae-命令)
   - [示例输出](#示例输出--light-版本)
   - [配置](#配置)
   - [环境变量](#环境变量)
@@ -136,12 +140,12 @@
 ## 功能
 
 - **交互式 TUI 模式** - 由 Ratatui 驱动的精美终端 UI（默认模式）
-  - 4 个交互式视图：概览、模型、每日、统计
+  - 6 个交互式视图：概览、模型、每日、每时、统计、代理（可选的 Minutely 视图通过 `minutelyTabEnabled` 启用）
   - 键盘和鼠标导航
   - 9 种颜色主题的 GitHub 风格贡献图
   - 实时筛选和排序
   - 零闪烁渲染
-- **多平台支持** - 跟踪 OpenCode、Claude Code、Codex CLI、Copilot CLI、Cursor IDE、Gemini CLI、Amp、Codebuff、Droid、OpenClaw、Hermes Agent、Pi、Kimi CLI、Qwen CLI、Roo Code、Kilo、Mux、Kilo CLI、Crush、Goose、Antigravity 和 Synthetic 的使用情况
+- **多平台支持** - 跟踪 OpenCode、Claude Code、Codex CLI、Copilot CLI、Cursor IDE、Gemini CLI、Amp、Codebuff、Droid、OpenClaw、Hermes Agent、Pi、Kimi CLI、Qwen CLI、Roo Code、Kilo、Mux、Kilo CLI、Crush、Goose、Antigravity、Zed、Kiro、Trae 和 Synthetic 的使用情况
 - **实时定价** - 从 LiteLLM 获取当前价格，带 1 小时磁盘缓存；OpenRouter 自动回退和新模型的 Cursor 定价支持
 - **详细分解** - 输入、输出、缓存读写和推理 Token 跟踪
 - **原生 Rust 核心** - 所有解析和聚合在 Rust 中完成，处理速度提升 10 倍
@@ -161,8 +165,8 @@ npx tokscale@latest
 # 或使用 bunx
 bunx tokscale@latest
 
-# 或使用 deno dx
-dx tokscale@latest
+# 或使用 Deno（无需安装别名）
+deno x npm:tokscale@latest
 
 # 轻量模式（仅表格渲染）
 npx tokscale@latest --light
@@ -245,15 +249,21 @@ tokscale models --json > report.json   # 保存到文件
 
 - **6 个视图**：概览（图表 + 热门模型）、模型、每日、每时、统计（贡献图）、代理
 - **键盘导航**：
-  - `1-6` 或 `←/→/Tab`：切换视图
-  - `↑/↓`：导航列表
+  - `←/→/Tab/BackTab`：切换视图
+  - `↑/↓` 或 `Home/End`：导航列表
+  - `Enter`：打开每日详情（Daily 标签）/ 选择图表单元格（Stats 标签）
+  - `Esc` 或 `Backspace`：关闭对话框 / 退出详情视图
   - `c/d/t`：按成本/日期/Token 排序
+  - `j`：跳转到今天
   - `s`：打开来源选择对话框
   - `g`：打开分组方式选择对话框（模型、客户端+模型、客户端+提供商+模型）
+  - `h`：切换日/时图表粒度（Overview 标签）
+  - `v`：切换表格/Profile 视图（Hourly 标签）
+  - `y`：复制选中行到剪贴板
   - `p`：循环 9 种颜色主题
-  - `r`：刷新数据
+  - `r`：刷新数据；`Shift+R` 切换自动刷新；`+`/`-` 调整间隔
   - `e`：导出为 JSON
-  - `q`：退出
+  - `q` 或 `Ctrl+C`：退出
 - **鼠标支持**：点击标签、按钮和筛选器
 - **主题**：Green、Halloween、Teal、Blue、Pink、Purple、Orange、Monochrome、YlGnBu
 - **设置持久化**：偏好设置保存到 `~/.config/tokscale/settings.json`（参见[配置](#配置)）
@@ -314,7 +324,7 @@ tokscale --client synthetic
 tokscale --client opencode,claude --week --json
 ```
 
-可用值：`opencode`、`claude`、`codex`、`copilot`、`gemini`、`cursor`、`amp`、`codebuff`、`droid`、`openclaw`、`hermes`、`pi`、`kimi`、`qwen`、`roocode`、`kilocode`、`kilo`、`mux`、`crush`、`goose`、`antigravity`、`synthetic`。
+可用值：`opencode`、`claude`、`codex`、`copilot`、`gemini`、`cursor`、`amp`、`codebuff`、`droid`、`openclaw`、`hermes`、`pi`、`kimi`、`qwen`、`roocode`、`kilocode`、`kilo`、`mux`、`crush`、`goose`、`antigravity`、`zed`、`kiro`、`trae`、`synthetic`。
 
 > **弃用通知**：旧的单客户端选项（`--opencode`、`--claude`、`--codex` 等）出于向后兼容仍然可用，但已从 `--help` 中隐藏，将在下一个主要版本中移除。请尽量迁移到 `--client`。在交互式终端中使用旧选项时会输出一行警告。
 
@@ -470,6 +480,43 @@ tokscale antigravity purge-cache
 
 **工作原理**：`tokscale antigravity sync` 会发现本地的 Antigravity 会话候选项，从本地语言服务器 RPC 获取已确认的使用数据，并以归一化的 JSONL 产物形式存储，供 tokscale-core 后续解析。如果希望报告反映最新的 Antigravity 数据，请在生成报告前先运行同步。
 
+### Trae 命令
+
+Trae（[ByteDance 的 AI IDE](https://www.trae.ai/)）有两个国际版产品线 —— Trae IDE 和 Trae Solo。它们共享同一份账号级使用量数据（同后端、同 JWT），所以 tokscale 将其统一报告为一个 `trae` 客户端。装一个或两个都可以，tokscale 会自动从任何已安装的桌面端发现凭据。
+
+凭据通过 `--variant` 按桌面端区分：
+
+- **`--variant ide`** —— 来自 Trae IDE 的凭据（`~/Library/Application Support/Trae/`）
+- **`--variant solo`** —— 来自 Trae Solo 的凭据（`~/Library/Application Support/TRAE SOLO/`）
+
+`tokscale trae sync` 每次运行只调用一次官方的 `query_user_usage_group_by_session` API（无论安装了几个桌面端），并将原始 JSON 持久化到本地缓存。
+
+```bash
+# 登录（自动从任意已安装的 Trae 桌面客户端检测凭据）
+tokscale trae login
+
+# 手动输入 JWT（适用于无法自动找到 storage.json 的环境，
+# 例如 Linux/Windows 或无头服务器）。在浏览器打开
+# https://www.trae.ai/account-setting#usage，F12 → Network →
+# 过滤 `query_user_usage` → 复制 `Authorization` header 的值。
+tokscale trae login --manual --variant solo
+
+# 查看哪些变体已有缓存凭据
+tokscale trae status
+
+# 同步使用量（使用第一个可用的凭据来源）
+tokscale trae sync --since 30
+
+# 清除某个变体的缓存凭据
+tokscale trae logout --variant solo
+```
+
+**缓存位置**：`~/.config/tokscale/trae-cache/`
+
+**工作原理**：tokscale 会解密桌面客户端的 `iCubeAuthInfo://*` blob（`globalStorage/storage.json`）来恢复 JWT，或接受通过 `--manual` 粘贴的 JWT。随后它分页调用 `POST /trae/api/v1/pay/query_user_usage_group_by_session` 并保存原始 JSON。如果希望报告反映最新的 Trae 数据，请在生成报告前先运行同步。
+
+> **中国区版本**：中国区版本（`trae.com.cn`）目前有意不支持。CN 后端暂未暴露按会话查询使用量的官方 API；如果上游提供正式端点，再加入支持。
+
 ### 示例输出（`--light` 版本）
 
 <img alt="CLI Light" src="./.github/assets/cli-light.png" />
@@ -495,10 +542,25 @@ Tokscale 将设置存储在 `~/.config/tokscale/settings.json`：
 | `nativeTimeoutMs` | number | `300000` | 原生子进程处理最大时间（5000-3600000ms） |
 | `defaultClients` | string[] | `[]` | 未传递 `--client/-c` 选项时应用的客户端筛选。接受与 `--client` 相同的 ID（例如 `["opencode", "claude", "synthetic"]`）。未知 ID 会被静默丢弃。命令行选项会完全覆盖此列表 — 不会合并。 |
 | `light.writeCache` | boolean | `false` | 为 `true` 时，`tokscale --light` 会在渲染完成后以原子方式覆盖 TUI 缓存。CLI 标志 `--write-cache` / `--no-write-cache` 会按次运行覆盖该设置。 |
+| `minutelyTabEnabled` | boolean | `false` | 在 TUI 中显示按分钟的 Minutely 标签，并在数据加载期间执行分钟级聚合。对大多数用户而言，分钟级粒度是较为小众的诊断视图，而在大数据集上分钟分桶有非平凡的代价，因此默认关闭。 |
+
+#### 启用 Minutely 标签
+
+Minutely 标签按分钟显示 Token 使用情况，最适合用于诊断突发模式、调试单个会话，或与 `autoRefreshEnabled` 配合进行近实时监控。分钟级聚合在数据加载期间会遍历所有已解析的消息，对大多数用户来说带来不必要的 RAM 与 CPU 开销。因此默认情况下它是隐藏的。
+
+要启用它，请在 `~/.config/tokscale/settings.json` 中将 `minutelyTabEnabled` 设为 `true`：
+
+```json
+{
+  "minutelyTabEnabled": true
+}
+```
+
+重启后，Minutely 标签将出现在标签栏中 Hourly 与 Stats 之间，Tab / BackTab / Left / Right 导航将会在其间循环。把该标志再设为 `false` 可隐藏标签并再次跳过聚合。
 
 #### 缓存目录布局
 
-可再生成的 CLI/TUI/价格/Wrapped 缓存位于 `~/.config/tokscale/cache/` 下（如果设置了 `TOKSCALE_CONFIG_DIR`，则为 `${TOKSCALE_CONFIG_DIR}/cache/`）。Antigravity 同步产物仍保留在 `~/.config/tokscale/antigravity-cache/`：
+可再生成的 CLI/TUI/价格/Wrapped 缓存位于 `~/.config/tokscale/cache/` 下（如果设置了 `TOKSCALE_CONFIG_DIR`，则为 `${TOKSCALE_CONFIG_DIR}/cache/`）。集成同步产物保留在各自的客户端缓存目录中，例如 `~/.config/tokscale/antigravity-cache/` 和 `~/.config/tokscale/trae-cache/`：
 
 - `tui-data-cache.json` —— TUI 启动缓存
 - `source-message-cache.bin` + `source-message-cache.lock` —— 源消息缓存与锁文件
@@ -515,7 +577,7 @@ Tokscale 将设置存储在 `~/.config/tokscale/settings.json`：
 | 变量 | 默认值 | 描述 |
 |----------|---------|-------------|
 | `TOKSCALE_NATIVE_TIMEOUT_MS` | `300000`（5 分钟） | 覆盖 `nativeTimeoutMs` 配置 |
-| `TOKSCALE_CONFIG_DIR` | unset | 覆盖配置目录根（`settings.json`、`star-cache.json`、`cache/`、`antigravity-cache/` 的存放位置）。建议使用绝对路径；相对路径将基于进程 CWD 解析。适用于 CI 沙箱或固定到非默认位置。设置后，tokscale 不会回退到 macOS 旧路径（`~/Library/Application Support/tokscale/`）。 |
+| `TOKSCALE_CONFIG_DIR` | unset | 覆盖配置目录根（`settings.json`、`star-cache.json`、`cache/`、`antigravity-cache/`、`trae-cache/` 的存放位置）。建议使用绝对路径；相对路径将基于进程 CWD 解析。适用于 CI 沙箱或固定到非默认位置。设置后，tokscale 不会回退到 macOS 旧路径（`~/Library/Application Support/tokscale/`）。 |
 
 ```bash
 # 示例：为非常大的数据集增加超时时间
@@ -598,7 +660,7 @@ tokscale sources --json
 - **交互式提示**：悬停查看详细的每日分解
 - **每日分解面板**：点击查看每个来源和模型的详情
 - **年份筛选**：在年份之间导航
-- **来源筛选**：按平台筛选（OpenCode、Claude、Codex、Copilot、Cursor、Gemini、Amp、Codebuff、Droid、OpenClaw、Hermes Agent、Pi、Kimi、Qwen、Roo Code、Kilo、Mux、Kilo CLI、Crush、Goose、Antigravity、Synthetic）
+- **来源筛选**：按平台筛选（OpenCode、Claude、Codex、Copilot、Cursor、Gemini、Amp、Codebuff、Droid、OpenClaw、Hermes Agent、Pi、Kimi、Qwen、Roo Code、Kilo、Mux、Kilo CLI、Crush、Goose、Antigravity、Zed、Kiro、Trae、Synthetic）
 - **统计面板**：总成本、Token、活跃天数、连续记录
 - **FOUC 防护**：在 React 水合前应用主题（无闪烁）
 
@@ -893,7 +955,7 @@ AI 编程工具将会话数据存储在跨平台位置。大多数工具在所�
 | Codex CLI | `~/.codex/` | `%USERPROFILE%\.codex\` | 可通过 `CODEX_HOME` 环境变量配置（[源码](https://github.com/openai/codex)） |
 | Copilot CLI | `~/.copilot/otel/` | `%USERPROFILE%\.copilot\otel\` | 需要 OTEL 文件导出；同时自动采集 `COPILOT_OTEL_FILE_EXPORTER_PATH` |
 | Hermes Agent | `~/.hermes/` | `%USERPROFILE%\.hermes\` | 可通过 `HERMES_HOME` 环境变量配置（[源码](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/developer-guide/session-storage.md)） |
-| Gemini CLI | `~/.gemini/` | `%USERPROFILE%\.gemini\` | 所有平台使用相同路径 |
+| Gemini CLI | `~/.gemini/` | `%USERPROFILE%\.gemini\` | 可通过 `GEMINI_CLI_HOME` 环境变量配置 |
 | Amp | `~/.local/share/amp/` | `%USERPROFILE%\.local\share\amp\` | 与 OpenCode 一样使用 `xdg-basedir` |
 | Cursor | API 同步 | API 同步 | 通过 API 获取数据，缓存在 `%USERPROFILE%\.config\tokscale\cursor-cache\` |
 | Droid | `~/.factory/` | `%USERPROFILE%\.factory\` | 所有平台使用相同路径 |
@@ -908,6 +970,7 @@ AI 编程工具将会话数据存储在跨平台位置。大多数工具在所�
 | Crush | `$XDG_DATA_HOME/crush/`（回退路径：`~/.local/share/crush/`） | `%USERPROFILE%\.local\share\crush\`（如果设置了 `%XDG_DATA_HOME%`，则为 `%XDG_DATA_HOME%\crush\`） | 使用带回退路径的 XDG 数据目录 |
 | Goose | `~/.local/share/goose/sessions/`（+ macOS Application Support、旧版 Block 路径） | `%USERPROFILE%\.local\share\goose\sessions\` | 可通过 `GOOSE_PATH_ROOT` 环境变量配置 |
 | Antigravity | `~/.config/tokscale/antigravity-cache/sessions/` | — | `tokscale antigravity sync` 目前仅支持 macOS / Linux |
+| Trae | `~/.config/tokscale/trae-cache/sessions/` | `%APPDATA%\tokscale\trae-cache\sessions\` | 通过 `tokscale trae sync` 同步一次；凭据会从已安装的任意 Trae IDE 或 Trae Solo 桌面端自动发现 |
 | Synthetic | 从其他来源重归属 | 从其他来源重归属 | 检测 `hf:` 模型前缀 + `synthetic` provider |
 
 > **注意**：在 Windows 上，`~` 扩展为 `%USERPROFILE%`（例如 `C:\Users\用户名`）。这些工具故意使用 Unix 风格的路径（如 `.local/share`）而不是 Windows 原生路径（如 `%APPDATA%`），以实现跨平台一致性。
@@ -919,6 +982,7 @@ Tokscale 将配置存储在：
 - **缓存**: `%APPDATA%\tokscale\cache\`（统一缓存根目录）
 - **旧版缓存路径**: 旧版本曾使用 `%USERPROFILE%\.cache\tokscale\` 这类分散路径；在可再生数据写入新路径之前，这些旧路径可能仍然存在。
 - **Cursor 凭据**: `%USERPROFILE%\.config\tokscale\cursor-credentials.json`
+- **Trae 凭据和同步使用量**: `%APPDATA%\tokscale\trae-cache\`
 - **Tokscale 账号凭据**: `%USERPROFILE%\.config\tokscale\credentials.json`
 
 ## 会话数据保留
@@ -928,7 +992,7 @@ Tokscale 将配置存储在：
 | 平台 | 默认值 | 配置文件 | 禁用设置 | 来源 |
 |----------|---------|-------------|-------------------|--------|
 | Claude Code | **⚠️ 30 天** | `~/.claude/settings.json` | `"cleanupPeriodDays": 9999999999` | [文档](https://docs.anthropic.com/en/docs/claude-code/settings) |
-| Gemini CLI | 禁用 | `~/.gemini/settings.json` | `"general.sessionRetention.enabled": false` | [文档](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/session-management.md) |
+| Gemini CLI | 禁用 | `$GEMINI_CLI_HOME/settings.json`（回退：`~/.gemini/settings.json`） | `"general.sessionRetention.enabled": false` | [文档](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/session-management.md) |
 | Codex CLI | 禁用 | N/A | 无清理功能 | [#6015](https://github.com/openai/codex/issues/6015) |
 | OpenCode | 禁用 | N/A | 无清理功能 | [#4980](https://github.com/sst/opencode/issues/4980) |
 
@@ -949,7 +1013,7 @@ Tokscale 将配置存储在：
 
 **默认**：清理已禁用（会话永久保留）
 
-如果您已启用清理并想禁用它，请在 `~/.gemini/settings.json` 中删除或设置 `enabled: false`：
+如果您已启用清理并想禁用它，请在 `$GEMINI_CLI_HOME/settings.json`（回退：`~/.gemini/settings.json`）中删除或设置 `enabled: false`：
 ```json
 {
   "general": {
@@ -1070,7 +1134,7 @@ Tokscale 将 `chat` span 作为 Token 统计的真实来源，并在第一阶段
 
 ### Gemini CLI
 
-位置：`~/.gemini/tmp/{projectHash}/chats/*.json`
+位置：`$GEMINI_CLI_HOME/tmp/{projectHash}/chats/*.json`（回退：`~/.gemini/tmp/{projectHash}/chats/*.json`）
 
 包含消息数组的会话文件：
 ```json
@@ -1093,6 +1157,12 @@ Cursor 数据使用您的会话令牌从 Cursor API 获取并本地缓存。运�
 位置：`~/.config/tokscale/antigravity-cache/sessions/*.jsonl`（通过本地 Antigravity 语言服务器 RPC 同步）
 
 Antigravity 数据不会被根命令自动获取。请在启用了 Antigravity 的编辑器打开时运行 `tokscale antigravity sync` 来刷新本地缓存，然后对缓存的 JSONL 产物使用常规的 tokscale 报告和筛选。
+
+### Trae
+
+位置：`~/.config/tokscale/trae-cache/sessions/*.json`（通过官方使用量 API 同步）
+
+Trae 数据不会被根命令自动获取。先运行一次 `tokscale trae login`，然后在生成报告前运行 `tokscale trae sync`。Tokscale 会将同步得到的 API dump 解析为会话级记录，并保留 Trae 返回的成本总额。
 
 ### OpenClaw
 

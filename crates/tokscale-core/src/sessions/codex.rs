@@ -61,6 +61,7 @@ pub struct CodexTokenUsage {
     pub cached_input_tokens: Option<i64>,
     pub cache_read_input_tokens: Option<i64>,
     pub reasoning_output_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -152,6 +153,8 @@ impl CodexTotals {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CodexParseState {
     pub current_model: Option<String>,
+    #[serde(default)]
+    pub current_turn_start_ms: Option<i64>,
     pub previous_totals: Option<CodexTotals>,
     pub session_is_headless: bool,
     pub session_id_from_meta: Option<String>,
@@ -160,6 +163,9 @@ pub(crate) struct CodexParseState {
     pub session_agent: Option<String>,
     pub session_workspace_key: Option<String>,
     pub session_workspace_label: Option<String>,
+    pub forked_child_waiting_for_turn_context: bool,
+    pub forked_child_inherited_baseline: Option<CodexTotals>,
+    pub forked_child_inherited_reported_total: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -261,6 +267,21 @@ fn parse_codex_reader<R: BufRead>(
                 };
                 let event_model = payload_model.clone().or(info_model.clone());
 
+                if state.forked_child_waiting_for_turn_context {
+                    if entry.entry_type == "turn_context" {
+                        state.forked_child_waiting_for_turn_context = false;
+                        state.current_model = payload_model.clone();
+                        handled = true;
+                    } else {
+                        if is_token_count {
+                            if let Some(info) = payload.info.as_ref() {
+                                remember_forked_child_inherited_baseline(&mut state, info);
+                            }
+                        }
+                        continue;
+                    }
+                }
+
                 if !pending_model_messages.is_empty()
                     && event_model.is_none()
                     && !is_token_count
@@ -283,6 +304,9 @@ fn parse_codex_reader<R: BufRead>(
                     }
                     if let Some(ref forked_from_id) = payload.forked_from_id {
                         state.session_forked_from_id = Some(forked_from_id.clone());
+                        state.forked_child_waiting_for_turn_context = true;
+                        state.forked_child_inherited_baseline = None;
+                        state.forked_child_inherited_reported_total = None;
                     }
                     if let Some(ref provider) = payload.model_provider {
                         state.session_provider = Some(provider.clone());
@@ -299,6 +323,8 @@ fn parse_codex_reader<R: BufRead>(
                 // Extract model from turn_context
                 if entry.entry_type == "turn_context" {
                     state.current_model = payload_model.clone();
+                    state.current_turn_start_ms =
+                        parse_codex_entry_timestamp(entry.timestamp.as_deref());
                     if let Some(model) = state.current_model.clone() {
                         flush_pending_model_messages(
                             &mut pending_model_messages,
@@ -336,6 +362,21 @@ fn parse_codex_reader<R: BufRead>(
                     // dedup and monotonicity checks — never as a direct delta source.
                     let total_usage = info.total_token_usage.as_ref().map(CodexTotals::from_usage);
                     let last_usage = info.last_token_usage.as_ref().map(CodexTotals::from_usage);
+
+                    if forked_child_matches_inherited_baseline(
+                        &state,
+                        info.total_token_usage.as_ref(),
+                        total_usage,
+                    ) {
+                        if let Some(total) = total_usage {
+                            state.previous_totals = Some(total);
+                        }
+                        state.forked_child_inherited_baseline = None;
+                        state.forked_child_inherited_reported_total = None;
+                        continue;
+                    }
+                    state.forked_child_inherited_baseline = None;
+                    state.forked_child_inherited_reported_total = None;
 
                     let (tokens, next_totals) =
                         match (total_usage, last_usage, state.previous_totals) {
@@ -391,11 +432,10 @@ fn parse_codex_reader<R: BufRead>(
 
                     state.previous_totals = next_totals;
 
-                    let parsed_timestamp = entry
-                        .timestamp
-                        .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
-                        .map(|dt| dt.timestamp_millis());
+                    let parsed_timestamp = parse_codex_entry_timestamp(entry.timestamp.as_deref());
                     let timestamp = parsed_timestamp.unwrap_or(fallback_timestamp);
+                    let duration_ms =
+                        duration_between_ms(state.current_turn_start_ms, parsed_timestamp);
 
                     let agent = if state.session_is_headless {
                         Some("headless".to_string())
@@ -415,6 +455,7 @@ fn parse_codex_reader<R: BufRead>(
                         0.0,
                         agent,
                     );
+                    message.duration_ms = duration_ms;
                     if parsed_timestamp.is_some() {
                         if let Some(model) = model.as_deref() {
                             set_codex_dedup_key(&mut message, model);
@@ -444,6 +485,13 @@ fn parse_codex_reader<R: BufRead>(
 
         if handled {
             continue;
+        }
+
+        if state.forked_child_waiting_for_turn_context {
+            let mut json_probe = trimmed.as_bytes().to_vec();
+            if simd_json::from_slice::<Value>(&mut json_probe).is_ok() {
+                continue;
+            }
         }
 
         let headless_message = parse_codex_headless_line(
@@ -511,6 +559,17 @@ fn parse_codex_reader<R: BufRead>(
 
 fn codex_source_is_exec(source: Option<&Value>) -> bool {
     source.and_then(Value::as_str) == Some("exec")
+}
+
+fn parse_codex_entry_timestamp(timestamp: Option<&str>) -> Option<i64> {
+    timestamp
+        .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
+        .map(|dt| dt.timestamp_millis())
+}
+
+fn duration_between_ms(start_ms: Option<i64>, end_ms: Option<i64>) -> Option<i64> {
+    let duration = end_ms?.saturating_sub(start_ms?);
+    (duration > 0).then_some(duration)
 }
 
 fn codex_token_count_dedup_key(message: &UnifiedMessage, model: &str) -> String {
@@ -588,6 +647,41 @@ pub fn parse_codex_file(path: &Path) -> Vec<UnifiedMessage> {
         CodexParseState::default(),
     );
     parsed.messages
+}
+
+fn reported_total_tokens(usage: &CodexTokenUsage) -> Option<i64> {
+    usage.total_tokens.filter(|total| *total >= 0)
+}
+
+fn remember_forked_child_inherited_baseline(state: &mut CodexParseState, info: &CodexInfo) {
+    let Some(total_usage) = info.total_token_usage.as_ref() else {
+        return;
+    };
+
+    let totals = CodexTotals::from_usage(total_usage);
+    state.previous_totals = Some(totals);
+    state.forked_child_inherited_baseline = Some(totals);
+    state.forked_child_inherited_reported_total = reported_total_tokens(total_usage);
+}
+
+fn forked_child_matches_inherited_baseline(
+    state: &CodexParseState,
+    total_usage: Option<&CodexTokenUsage>,
+    totals: Option<CodexTotals>,
+) -> bool {
+    if let (Some(usage), Some(baseline)) =
+        (total_usage, state.forked_child_inherited_reported_total)
+    {
+        if reported_total_tokens(usage) == Some(baseline) {
+            return true;
+        }
+    }
+
+    if let (Some(totals), Some(baseline)) = (totals, state.forked_child_inherited_baseline) {
+        return totals == baseline;
+    }
+
+    false
 }
 
 pub(crate) fn parse_codex_file_incremental(
@@ -1352,6 +1446,7 @@ mod tests {
 
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].model_id, "o3-pro");
+        assert_eq!(messages[0].duration_ms, Some(1000));
     }
 
     #[test]
@@ -1390,6 +1485,80 @@ mod tests {
             Some("/Users/alice/codex-fork")
         );
         assert!(messages[0].dedup_key.is_some());
+    }
+
+    #[test]
+    fn test_forked_child_ignores_inherited_records_before_turn_context() {
+        let file = create_test_file(concat!(
+            r#"{"timestamp":"2026-05-05T21:51:57.991Z","type":"session_meta","payload":{"id":"child-session","forked_from_id":"parent-session","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent-session","depth":1}}},"model_provider":"openai","agent_nickname":"worker","cwd":"/repo-child"}}"#,
+            "\n",
+            r#"{"timestamp":"2026-05-05T21:51:57.992Z","type":"session_meta","payload":{"id":"parent-session","source":"interactive","model_provider":"azure","agent_nickname":"parent","cwd":"/repo-parent"}}"#,
+            "\n",
+            r#"{"timestamp":"2026-05-05T21:51:57.993Z","type":"event_msg","payload":{"type":"user_message","message":"parent prompt copied into child log"}}"#,
+            "\n",
+            r#"{"timestamp":"2026-05-05T21:51:57.994Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":116000,"cached_input_tokens":114000,"output_tokens":1000,"total_tokens":117000},"last_token_usage":{"input_tokens":73000,"cached_input_tokens":72000,"output_tokens":500,"total_tokens":73500}}}}"#,
+            "\n",
+            r#"{"timestamp":"2026-05-05T21:51:58.947Z","type":"turn_context","payload":{"model":"gpt-5.5","cwd":"/repo-child"}}"#,
+            "\n",
+            r#"{"timestamp":"2026-05-05T21:51:58.948Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":116000,"cached_input_tokens":114000,"output_tokens":1000,"total_tokens":117000},"last_token_usage":{"input_tokens":73000,"cached_input_tokens":72000,"output_tokens":500,"total_tokens":73500}}}}"#,
+            "\n",
+            r#"{"timestamp":"2026-05-05T21:51:59.253Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":117500,"cached_input_tokens":115000,"output_tokens":1200,"reasoning_output_tokens":50,"total_tokens":118700},"last_token_usage":{"input_tokens":1500,"cached_input_tokens":1000,"output_tokens":200,"reasoning_output_tokens":50,"total_tokens":1700}}}}"#,
+            "\n"
+        ));
+
+        let messages = parse_codex_file(file.path());
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].model_id, "gpt-5.5");
+        assert_eq!(messages[0].provider_id, "openai");
+        assert_eq!(messages[0].agent.as_deref(), Some("worker"));
+        assert_eq!(messages[0].workspace_key.as_deref(), Some("/repo-child"));
+        assert_eq!(messages[0].tokens.input, 500);
+        assert_eq!(messages[0].tokens.cache_read, 1000);
+        assert_eq!(messages[0].tokens.output, 200);
+        assert_eq!(messages[0].tokens.reasoning, 50);
+    }
+
+    #[test]
+    fn test_forked_child_incremental_state_skips_inherited_prefix() {
+        let file = create_test_file(concat!(
+            r#"{"timestamp":"2026-05-05T21:51:57.991Z","type":"session_meta","payload":{"id":"child-session","forked_from_id":"parent-session","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent-session","depth":1}}},"model_provider":"openai","agent_nickname":"worker","cwd":"/repo-child"}}"#,
+            "\n",
+            r#"{"timestamp":"2026-05-05T21:51:57.992Z","type":"session_meta","payload":{"id":"parent-session","source":"interactive","model_provider":"azure","agent_nickname":"parent","cwd":"/repo-parent"}}"#,
+            "\n",
+            r#"{"timestamp":"2026-05-05T21:51:57.994Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":116000,"cached_input_tokens":114000,"output_tokens":1000,"total_tokens":117000},"last_token_usage":{"input_tokens":73000,"cached_input_tokens":72000,"output_tokens":500,"total_tokens":73500}}}}"#,
+            "\n"
+        ));
+        let prefix_size = file.as_file().metadata().unwrap().len();
+        let prefix = parse_codex_file_incremental(file.path(), 0, CodexParseState::default());
+
+        assert!(prefix.parse_succeeded);
+        assert!(!prefix.unresolved_model_events);
+        assert!(prefix.messages.is_empty());
+
+        let appended = concat!(
+            r#"{"timestamp":"2026-05-05T21:51:58.947Z","type":"turn_context","payload":{"model":"gpt-5.5","cwd":"/repo-child"}}"#,
+            "\n",
+            r#"{"timestamp":"2026-05-05T21:51:58.948Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":116000,"cached_input_tokens":114000,"output_tokens":1000,"total_tokens":117000},"last_token_usage":{"input_tokens":73000,"cached_input_tokens":72000,"output_tokens":500,"total_tokens":73500}}}}"#,
+            "\n",
+            r#"{"timestamp":"2026-05-05T21:51:59.253Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":117500,"cached_input_tokens":115000,"output_tokens":1200,"reasoning_output_tokens":50,"total_tokens":118700},"last_token_usage":{"input_tokens":1500,"cached_input_tokens":1000,"output_tokens":200,"reasoning_output_tokens":50,"total_tokens":1700}}}}"#,
+            "\n"
+        );
+        let mut reopened = file.reopen().unwrap();
+        reopened.seek(SeekFrom::End(0)).unwrap();
+        reopened.write_all(appended.as_bytes()).unwrap();
+        reopened.flush().unwrap();
+
+        let incremental =
+            parse_codex_file_incremental(file.path(), prefix_size, prefix.state.clone());
+        let full = parse_codex_file(file.path());
+
+        assert_eq!(incremental.messages, full);
+        assert_eq!(incremental.messages.len(), 1);
+        assert_eq!(incremental.messages[0].tokens.input, 500);
+        assert_eq!(incremental.messages[0].tokens.cache_read, 1000);
+        assert_eq!(incremental.messages[0].tokens.output, 200);
+        assert_eq!(incremental.messages[0].tokens.reasoning, 50);
     }
 
     #[test]
@@ -1490,6 +1659,7 @@ mod tests {
             cached_input_tokens: Some(10),
             cache_read_input_tokens: Some(20),
             reasoning_output_tokens: Some(5),
+            total_tokens: None,
         };
         let totals = CodexTotals::from_usage(&usage);
         assert_eq!(totals.cached, 20);

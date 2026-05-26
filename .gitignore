@@ -30,3 +30,8 @@ ai-todolist.md
 .sisyphus
 crates/tokscale-cli/tokscale-export-*.json
 .claude/
+self-host/tokscale-key.pem
+self-host/
+.next/
+.vercel
+.env*.local

@@ -5,7 +5,7 @@ import styled, { css } from "styled-components";
 import { toast } from "react-toastify";
 import { GraphContainer } from "@/components/GraphContainer";
 import type { TokenContributionData } from "@/lib/types";
-import { formatNumber, formatCurrency } from "@/lib/utils";
+import { formatNumber, formatCurrency, formatDuration } from "@/lib/utils";
 import { legacy } from "@/lib/responsive";
 
 export interface ProfileUser {
@@ -24,6 +24,8 @@ export interface ProfileStatsData {
   cacheWriteTokens: number;
   activeDays: number;
   submissionCount?: number;
+  totalActiveTimeMs?: number;
+  sessionCount?: number;
 }
 
 export interface ProfileHeaderProps {
@@ -782,6 +784,12 @@ export function ProfileStats({ stats, favoriteModel }: ProfileStatsProps) {
   const statItems = [
     { label: "Submits", value: (stats.submissionCount ?? 0).toString(), color: "var(--color-primary)" },
     { label: "Favorite Model", value: favoriteModel ?? "N/A", color: "var(--color-primary)" },
+    ...(stats.totalActiveTimeMs && stats.totalActiveTimeMs > 0
+      ? [{ label: "Active Time", value: formatDuration(stats.totalActiveTimeMs), color: "var(--color-primary)" }]
+      : []),
+    ...(stats.sessionCount && stats.sessionCount > 0
+      ? [{ label: "Sessions", value: stats.sessionCount.toString(), color: "var(--color-primary)" }]
+      : []),
   ];
 
   return (
@@ -1067,6 +1075,8 @@ export function ProfileModels({ models, modelUsage }: ProfileModelsProps) {
 
 export interface ProfileActivityProps {
   data: TokenContributionData;
+  totalActiveTimeMs?: number | null;
+  sessionCount?: number | null;
 }
 
 const ActivityContainer = styled.div`
@@ -1092,11 +1102,11 @@ const ActivityInner = styled.div`
   }
 `;
 
-export function ProfileActivity({ data }: ProfileActivityProps) {
+export function ProfileActivity({ data, totalActiveTimeMs, sessionCount }: ProfileActivityProps) {
   return (
     <ActivityContainer>
       <ActivityInner>
-        <GraphContainer data={data} />
+        <GraphContainer data={data} totalActiveTimeMs={totalActiveTimeMs} sessionCount={sessionCount} />
       </ActivityInner>
     </ActivityContainer>
   );

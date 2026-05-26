@@ -71,6 +71,7 @@ pub struct ScanResult {
     pub hermes_db: Option<PathBuf>,
     pub goose_db: Option<PathBuf>,
     pub zed_db: Option<PathBuf>,
+    pub kiro_db: Option<PathBuf>,
     pub crush_dbs: Vec<CrushDbSource>,
     /// Path to the OpenCode legacy JSON directory (for migration cache stat checks)
     pub opencode_json_dir: Option<PathBuf>,
@@ -86,6 +87,7 @@ impl Default for ScanResult {
             hermes_db: None,
             goose_db: None,
             zed_db: None,
+            kiro_db: None,
             crush_dbs: Vec::new(),
             opencode_json_dir: None,
         }
@@ -883,6 +885,7 @@ fn scan_all_clients_with_env_strategy_inner(
         if xdg.is_file() {
             result.zed_db = Some(xdg);
         }
+        #[cfg(target_os = "macos")]
         if result.zed_db.is_none() {
             let macos_path = PathBuf::from(format!(
                 "{}/Library/Application Support/Zed/threads/threads.db",
@@ -905,6 +908,22 @@ fn scan_all_clients_with_env_strategy_inner(
 
     if enabled.contains(&ClientId::Crush) {
         result.crush_dbs = discover_crush_dbs(home_dir, use_env_roots);
+    }
+
+    if enabled.contains(&ClientId::Kiro) {
+        let xdg_path = PathBuf::from(format!("{}/.local/share/kiro-cli/data.sqlite3", home_dir));
+        if xdg_path.is_file() {
+            result.kiro_db = Some(xdg_path);
+        }
+        if result.kiro_db.is_none() {
+            let macos_path = PathBuf::from(format!(
+                "{}/Library/Application Support/kiro-cli/data.sqlite3",
+                home_dir
+            ));
+            if macos_path.is_file() {
+                result.kiro_db = Some(macos_path);
+            }
+        }
     }
 
     if enabled.contains(&ClientId::Codebuff) {
@@ -1299,6 +1318,7 @@ mod tests {
         zed_db
     }
 
+    #[cfg(target_os = "macos")]
     fn setup_mock_zed_macos_db(base: &std::path::Path) -> PathBuf {
         let zed_db = base.join("Library/Application Support/Zed/threads/threads.db");
         fs::create_dir_all(zed_db.parent().unwrap()).unwrap();
@@ -1942,6 +1962,7 @@ mod tests {
         restore_env("XDG_DATA_HOME", previous_xdg);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     #[serial]
     fn test_scan_all_clients_zed_macos_fallback() {
