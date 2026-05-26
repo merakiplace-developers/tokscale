@@ -20,9 +20,16 @@ import {
 } from "@/lib/db/helpers";
 import { normalizeUsernameCacheKey, revalidateUsernamePaths } from "@/lib/db/usernameLookup";
 import { revalidateUserGroupLeaderboards } from "@/lib/groups/cache";
+import { normalizeContributionDate } from "@/lib/leaderboard/normalizeContributionDate";
 
 const LEGACY_SUBMIT_DEVICE_KEY = "legacy-default";
 const LEGACY_SUBMIT_DEVICE_NAME = "Legacy submissions";
+
+// When LEADERBOARD_TIMEZONE is set, daily_breakdown.date is recomputed from
+// the CLI-supplied earliest-message timestamp instead of trusting the CLI's
+// local date string (see normalizeContributionDate). Unset env keeps upstream
+// global-SaaS behavior — the CLI string wins.
+const LEADERBOARD_TIMEZONE_OVERRIDE = process.env.LEADERBOARD_TIMEZONE || null;
 
 function normalizeSubmissionData(data: unknown): void {
   if (!data || typeof data !== "object") return;
@@ -290,6 +297,11 @@ export async function POST(request: Request) {
       }> = [];
 
       for (const incomingDay of data.contributions) {
+        const dayDate = normalizeContributionDate(
+          incomingDay.date,
+          incomingDay.timestampMs ?? null,
+          LEADERBOARD_TIMEZONE_OVERRIDE,
+        );
         const incomingClientBreakdown: Record<string, ClientBreakdownData> = {};
         for (const client_contrib of incomingDay.clients) {
           const modelData = clientContributionToBreakdownData(client_contrib);
@@ -324,7 +336,7 @@ export async function POST(request: Request) {
           }
         }
 
-        const existingDay = existingDaysMap.get(incomingDay.date);
+        const existingDay = existingDaysMap.get(dayDate);
 
         if (existingDay) {
           // Per-day device-aware merge.
@@ -365,7 +377,7 @@ export async function POST(request: Request) {
           toInsert.push({
             submissionId,
             submittedDeviceId: submittedDevice.id,
-            date: incomingDay.date,
+            date: dayDate,
             tokens: dayTotals.tokens,
             cost: dayTotals.cost.toFixed(4),
             inputTokens: dayTotals.inputTokens,

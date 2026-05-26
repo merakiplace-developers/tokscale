@@ -6462,6 +6462,30 @@ mod tests {
     }
 
     #[test]
+    fn test_to_ts_token_contribution_data_preserves_dates_beyond_utc_today() {
+        // Regression for PR #2 (cap_graph_result_to_utc_today removal):
+        // the submit pipeline used to silently drop any contribution whose
+        // date was past UTC today, which hid KST 00:00–09:00 same-day rows
+        // from the daily leaderboard. The payload must now carry every
+        // contribution through to the server unchanged; the server
+        // (LEADERBOARD_TIMEZONE-aware normalization) decides the bucket.
+        // A far-future date keeps this test resilient against calendar drift.
+        let far_future = "2099-12-31";
+        let graph = graph_result_with_contributions(vec![daily_contribution(
+            far_future,
+            100,
+            12.5,
+            "claude",
+            "claude-sonnet",
+        )]);
+
+        let payload = to_ts_token_contribution_data(&graph, None);
+
+        assert_eq!(payload.contributions.len(), 1);
+        assert_eq!(payload.contributions[0].date, far_future);
+    }
+
+    #[test]
     #[cfg(target_os = "macos")]
     #[serial_test::serial]
     fn test_load_star_cache_falls_back_to_legacy_macos_path() {
