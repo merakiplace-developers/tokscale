@@ -59,45 +59,52 @@
       "breakpoints": true
     },
     {
-      "idx": 6,
+      "idx": 8,
       "version": "7",
       "when": 1778025600000,
       "tag": "0006_rehash_plaintext_personal_tokens",
       "breakpoints": true
     },
     {
-      "idx": 7,
+      "idx": 9,
       "version": "7",
       "when": 1778025601000,
       "tag": "0007_add_submitted_devices",
       "breakpoints": true
     },
     {
-      "idx": 8,
+      "idx": 10,
       "version": "7",
       "when": 1778112000000,
       "tag": "0008_add_time_metrics_to_submissions",
       "breakpoints": true
     },
     {
-      "idx": 9,
+      "idx": 11,
       "version": "7",
       "when": 1778198400000,
       "tag": "0009_add_groups",
       "breakpoints": true
     },
     {
-      "idx": 10,
+      "idx": 12,
       "version": "7",
       "when": 1780000000000,
       "tag": "0010_submit_count_safety",
       "breakpoints": true
     },
     {
-      "idx": 11,
+      "idx": 13,
       "version": "7",
       "when": 1780086400000,
       "tag": "0011_drop_dead_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1780156800000,
+      "tag": "0012_extend_rls_to_synced_tables",
       "breakpoints": true
     }
   ]
