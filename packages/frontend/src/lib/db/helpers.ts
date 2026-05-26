@@ -87,6 +87,31 @@ export function mergeClientBreakdowns(
   return merged;
 }
 
+/**
+ * Flattened `model_breakdown` map: model id → total tokens summed across
+ * every client that reported it. Stored alongside the per-client breakdown
+ * so leaderboard/embed code can group by model without re-walking the
+ * nested structure. Fork-only column reintroduced after the 2026-05 sync,
+ * which dropped the helper while merging from upstream (see submit/route).
+ */
+export function buildModelBreakdown(
+  clientBreakdown: Record<string, ClientBreakdownData>
+): Record<string, number> {
+  const result: Record<string, number> = {};
+
+  for (const client of Object.values(clientBreakdown)) {
+    if (client.models) {
+      for (const [modelId, modelData] of Object.entries(client.models)) {
+        result[modelId] = (result[modelId] || 0) + modelData.tokens;
+      }
+    } else if (client.modelId) {
+      result[client.modelId] = (result[client.modelId] || 0) + client.tokens;
+    }
+  }
+
+  return result;
+}
+
 export function clientContributionToBreakdownData(
   client_contrib: {
     tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning?: number };

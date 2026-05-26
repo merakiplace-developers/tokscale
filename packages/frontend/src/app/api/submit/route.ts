@@ -15,6 +15,7 @@ import {
   mergeTimestampMs,
   aggregateDeviceContributions,
   buildDeviceContributionsForDay,
+  buildModelBreakdown,
   type ClientBreakdownData,
   type DeviceContributions,
 } from "@/lib/db/helpers";
@@ -354,6 +355,7 @@ export async function POST(request: Request) {
           // Aggregate across all devices
           const mergedClientBreakdown = aggregateDeviceContributions(devContribs);
           const dayTotals = recalculateDayTotals(mergedClientBreakdown);
+          const modelBreakdown = buildModelBreakdown(mergedClientBreakdown);
 
           toUpdate.push({
             id: existingDay.id,
@@ -369,6 +371,7 @@ export async function POST(request: Request) {
           });
         } else {
           const dayTotals = recalculateDayTotals(incomingClientBreakdown);
+          const modelBreakdown = buildModelBreakdown(incomingClientBreakdown);
 
           const devContribs: DeviceContributions = {
             [deviceKey]: { ...incomingClientBreakdown },

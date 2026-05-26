@@ -108,7 +108,7 @@ describe("GET /api/leaderboard", () => {
     });
 
     const response = await GET(
-      new Request("http://localhost:3000/api/leaderboard?period=all&sortBy=time")
+      new NextRequest("http://localhost:3000/api/leaderboard?period=all&sortBy=time")
     );
 
     expect(response.status).toBe(200);
@@ -146,7 +146,7 @@ describe("GET /api/leaderboard", () => {
     });
 
     const response = await GET(
-      new Request("http://localhost:3000/api/leaderboard?search=alice")
+      new NextRequest("http://localhost:3000/api/leaderboard?search=alice")
     );
 
     expect(response.status).toBe(200);
@@ -184,7 +184,7 @@ describe("GET /api/leaderboard", () => {
     });
 
     const impossibleRangeResponse = await GET(
-      new Request("http://localhost:3000/api/leaderboard?period=custom&from=2026-02-31&to=2026-03-01&search=alice")
+      new NextRequest("http://localhost:3000/api/leaderboard?period=custom&from=2026-02-31&to=2026-03-01&search=alice")
     );
     expect(impossibleRangeResponse.status).toBe(200);
     expect(getLeaderboardData).toHaveBeenCalledWith(
@@ -200,7 +200,7 @@ describe("GET /api/leaderboard", () => {
     getLeaderboardData.mockClear();
 
     const invertedRangeResponse = await GET(
-      new Request("http://localhost:3000/api/leaderboard?period=custom&from=2026-02-28&to=2026-02-10")
+      new NextRequest("http://localhost:3000/api/leaderboard?period=custom&from=2026-02-28&to=2026-02-10")
     );
     expect(invertedRangeResponse.status).toBe(200);
     expect(getLeaderboardData).toHaveBeenCalledWith(

@@ -12,6 +12,8 @@ import { useSettings } from "@/lib/useSettings";
 import { Switch } from "@/components/Switch";
 import { getSelfHostedUrl } from "@/lib/selfHosted";
 import { formatLeaderboardDateRange } from "@/lib/leaderboard/formatDateRange";
+import type { Period } from "@/lib/leaderboard/types";
+import type { LeaderboardSortBy } from "@/lib/leaderboard/constants";
 
 const Section = styled.div`
   margin-bottom: 40px;
@@ -843,8 +845,6 @@ const PaginationPages = styled.div`
   }
 `;
 
-export type Period = "all" | "month" | "week" | "day";
-
 export interface LeaderboardUser {
   rank: number;
   userId: string;
@@ -874,7 +874,7 @@ export interface LeaderboardData {
     uniqueUsers: number;
   };
   period: Period;
-  sortBy?: 'tokens' | 'cost';
+  sortBy?: LeaderboardSortBy;
   dateRange?: { start: string; end: string } | null;
   timezone?: string;
 }
@@ -882,7 +882,7 @@ export interface LeaderboardData {
 interface LeaderboardClientProps {
   initialData: LeaderboardData;
   currentUser: { id: string; username: string; displayName: string | null; avatarUrl: string | null } | null;
-  initialSortBy: 'tokens' | 'cost';
+  initialSortBy: LeaderboardSortBy;
   initialUserRank: LeaderboardUser | null;
 }
 
@@ -1042,7 +1042,7 @@ export default function LeaderboardClient({ initialData, currentUser, initialSor
     return () => abortController.abort();
   }, [currentUser, period, effectiveSortBy]);
 
-  const fetchData = (targetPeriod: Period, targetPage: number, targetSortBy: 'tokens' | 'cost', targetSearch: string, signal?: AbortSignal, silent = false) => {
+  const fetchData = (targetPeriod: Period, targetPage: number, targetSortBy: LeaderboardSortBy, targetSearch: string, signal?: AbortSignal, silent = false) => {
     if (!silent) {
       setIsLoading(true);
       setError(null);
