@@ -1948,3 +1948,67 @@ fn test_submit_offline_without_pricing_cache_fails() {
         "stderr should contain a pricing/network error: {stderr}"
     );
 }
+
+/// Builds an opencode fixture whose only message lands at 12:00 UTC *today*,
+/// and returns the calendar date that timestamp falls on in a UTC+14 zone —
+/// always UTC today + 1, since 12:00 UTC + 14h rolls past midnight.
+#[cfg(unix)]
+fn create_positive_utc_offset_submit_fixture_dir() -> (TempDir, String) {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let base = tmp.path();
+    prime_pricing_cache(base);
+
+    let utc_today = chrono::Utc::now().date_naive();
+    let utc_noon = utc_today.and_hms_opt(12, 0, 0).unwrap().and_utc();
+    let local_date = utc_today.succ_opt().unwrap().format("%Y-%m-%d").to_string();
+
+    let session = base.join(".local/share/opencode/storage/message/session1");
+    fs::create_dir_all(&session).unwrap();
+
+    let message = serde_json::json!({
+        "id": "msg_ahead_of_utc",
+        "sessionID": "session1",
+        "role": "assistant",
+        "modelID": "gpt-4o",
+        "providerID": "openai",
+        "cost": 0.02,
+        "tokens": {
+            "input": 1000,
+            "output": 500,
+            "reasoning": 0,
+            "cache": { "read": 200, "write": 50 }
+        },
+        "time": { "created": utc_noon.timestamp_millis() as f64 }
+    });
+    fs::write(session.join("msg_ahead_of_utc.json"), message.to_string()).unwrap();
+
+    (tmp, local_date)
+}
+
+/// Regression: `submit` used to run every contribution through a
+/// `date <= UTC today` filter before building the payload. The CLI buckets days
+/// with `chrono::Local`, so in any zone ahead of UTC the local date outruns the
+/// UTC one for the tail of each UTC day — 00:00–09:00 in KST. Every
+/// contribution dated "today" was silently dropped from the request during that
+/// window, so the day never reached the server and the daily leaderboard stayed
+/// empty until UTC caught up.
+///
+/// Unix-only: the expected date is UTC+1 day, which only holds if the child
+/// really runs in `Pacific/Kiritimati`. `TZ` does not move `chrono::Local` on
+/// Windows.
+#[test]
+#[cfg(unix)]
+fn test_submit_dry_run_preserves_local_date_ahead_of_utc() {
+    let (tmp, expected_local_date) = create_positive_utc_offset_submit_fixture_dir();
+
+    cmd_with_home(tmp.path())
+        .env("TZ", "Pacific/Kiritimati")
+        .env("TOKSCALE_API_TOKEN", "test-token")
+        .args(["submit", "--opencode", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "Date range: {expected_local_date} to {expected_local_date}"
+        )))
+        .stdout(predicate::str::contains("Total tokens: 1,750"));
+}
