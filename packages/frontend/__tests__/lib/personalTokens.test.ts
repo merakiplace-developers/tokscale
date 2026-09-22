@@ -366,6 +366,29 @@ describe("personal token service", () => {
     expect(mockState.db.update).not.toHaveBeenCalled();
   });
 
+  it("rejects a token belonging to a hidden user", async () => {
+    // Offboarding deletes these rows, but a token issued in the gap — or
+    // restored from a backup — must not keep working under a hidden account.
+    mockState.pushSelectResult([
+      {
+        tokenId: "token-1",
+        tokenValue: "hashed_tt_test_token",
+        userId: "user-1",
+        username: "alice",
+        displayName: "Alice",
+        avatarUrl: null,
+        isAdmin: false,
+        hiddenAt: new Date("2026-09-01T00:00:00.000Z"),
+        expiresAt: null,
+      },
+    ]);
+
+    const result = await authenticatePersonalToken("tt_test_token");
+
+    expect(result).toEqual({ status: "invalid" });
+    expect(mockState.db.update).not.toHaveBeenCalled();
+  });
+
   it("returns the user and touches lastUsedAt for a valid token", async () => {
     mockState.pushSelectResult([
       {

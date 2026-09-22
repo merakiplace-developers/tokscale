@@ -119,10 +119,16 @@ export interface AvatarProbeSummary {
  * damage of a false positive.
  */
 export async function runAvatarProbe(
-  options: { confirmAfterMs?: number; now?: Date } = {}
+  options: {
+    confirmAfterMs?: number;
+    now?: Date;
+    /** Injectable for tests; defaults to the real HTTP probe. */
+    probe?: (url: string) => Promise<ProbeOutcome>;
+  } = {}
 ): Promise<AvatarProbeSummary> {
   const confirmAfterMs = options.confirmAfterMs ?? DEFAULT_CONFIRM_AFTER_MS;
   const now = options.now ?? new Date();
+  const probe = options.probe ?? probeAvatar;
 
   const candidates = await db
     .select({
@@ -141,7 +147,7 @@ export async function runAvatarProbe(
   const probeable = candidates.filter((user) => isGoogleAvatarUrl(user.avatarUrl));
 
   const outcomes = await mapWithConcurrency(probeable, PROBE_CONCURRENCY, (user) =>
-    probeAvatar(user.avatarUrl as string)
+    probe(user.avatarUrl as string)
   );
 
   const summary: AvatarProbeSummary = {

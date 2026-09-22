@@ -358,3 +358,82 @@ describe("period leaderboard data", () => {
     );
   });
 });
+
+describe("hidden users on the period leaderboard", () => {
+  const visibleRow = {
+    userId: "user-alice",
+    username: "alice",
+    displayName: "Alice",
+    avatarUrl: null,
+    tokens: 250,
+    cost: 3,
+    updatedAt: "2026-03-07T11:00:00.000Z",
+    cliVersion: "1.5.0",
+    schemaVersion: 1,
+    hiddenAt: null,
+  };
+
+  const hiddenRow = {
+    userId: "user-bob",
+    username: "bob",
+    displayName: "Bob",
+    avatarUrl: null,
+    tokens: 1000,
+    cost: 9.5,
+    updatedAt: "2026-03-06T09:00:00.000Z",
+    cliVersion: "1.5.0",
+    schemaVersion: 1,
+    hiddenAt: new Date("2026-03-06T00:00:00.000Z"),
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-07T18:45:00Z"));
+  });
+
+  it("keeps hidden users out of the listing but inside the totals", async () => {
+    mockState.setPeriodRows([visibleRow, hiddenRow]);
+
+    const leaderboard = await getLeaderboardData("week", 1, 50, "tokens");
+
+    expect(leaderboard.users.map((user) => user.username)).toEqual(["alice"]);
+    // Org-wide usage must still account for work done by people who have left.
+    expect(leaderboard.stats.totalTokens).toBe(1250);
+    expect(leaderboard.stats.totalCost).toBe(12.5);
+    expect(leaderboard.stats.uniqueUsers).toBe(2);
+    expect(leaderboard.pagination.totalUsers).toBe(1);
+  });
+
+  it("closes the rank gap left by a hidden user", async () => {
+    // bob outranks alice on tokens, so hiding him must promote her to rank 1
+    // rather than leaving a hole at the top.
+    mockState.setPeriodRows([visibleRow, hiddenRow]);
+
+    const leaderboard = await getLeaderboardData("week", 1, 50, "tokens");
+
+    expect(leaderboard.users[0]).toMatchObject({ username: "alice", rank: 1 });
+  });
+
+  it("does not leak the hidden flag to callers", async () => {
+    mockState.setPeriodRows([visibleRow, hiddenRow]);
+
+    const leaderboard = await getLeaderboardData("week", 1, 50, "tokens");
+
+    expect(leaderboard.users[0]).not.toHaveProperty("hidden");
+  });
+
+  it("returns no rank for a hidden user", async () => {
+    mockState.setPeriodRows([visibleRow, hiddenRow]);
+
+    await expect(getUserRank("bob", "week", "tokens")).resolves.toBeNull();
+  });
+
+  it("still ranks visible users against visible users only", async () => {
+    mockState.setPeriodRows([visibleRow, hiddenRow]);
+
+    await expect(getUserRank("alice", "week", "tokens")).resolves.toMatchObject({
+      username: "alice",
+      rank: 1,
+    });
+  });
+});

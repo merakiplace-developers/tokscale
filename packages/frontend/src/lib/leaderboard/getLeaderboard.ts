@@ -29,16 +29,12 @@ interface LeaderboardPeriodRow {
 
 /**
  * Period rows are aggregated with hidden users still included so the stats
- * block reports true org-wide totals; the flag is dropped right before the
- * visible listing is built.
+ * block reports true org-wide totals. Hidden-ness is tracked alongside the
+ * users rather than on them, so it can never leak into a response.
  */
-type AggregatedPeriodUser = Omit<LeaderboardUser, "rank"> & { hidden: boolean };
-
-function stripHiddenFlag(
-  user: AggregatedPeriodUser
-): Omit<LeaderboardUser, "rank"> {
-  const { hidden: _hidden, ...rest } = user;
-  return rest;
+interface AggregatedPeriodRows {
+  users: Array<Omit<LeaderboardUser, "rank">>;
+  hiddenUserIds: Set<string>;
 }
 
 interface PeriodDateRange {
@@ -139,10 +135,15 @@ function compareLeaderboardUsers(
 function aggregatePeriodRows(
   rows: LeaderboardPeriodRow[],
   sortBy: SortBy
-): AggregatedPeriodUser[] {
-  const usersById = new Map<string, AggregatedPeriodUser>();
+): AggregatedPeriodRows {
+  const usersById = new Map<string, Omit<LeaderboardUser, "rank">>();
+  const hiddenUserIds = new Set<string>();
 
   for (const row of rows) {
+    if (row.hidden) {
+      hiddenUserIds.add(row.userId);
+    }
+
     const existing = usersById.get(row.userId);
 
     if (existing) {
@@ -173,13 +174,15 @@ function aggregatePeriodRows(
         cliVersion: row.cliVersion,
         schemaVersion: row.schemaVersion,
       }),
-      hidden: row.hidden,
     });
   }
 
-  return Array.from(usersById.values()).sort((left, right) =>
-    compareLeaderboardUsers(left, right, sortBy)
-  );
+  return {
+    users: Array.from(usersById.values()).sort((left, right) =>
+      compareLeaderboardUsers(left, right, sortBy)
+    ),
+    hiddenUserIds,
+  };
 }
 
 function matchesLeaderboardSearch(
@@ -202,12 +205,17 @@ function buildPeriodLeaderboardData(
   search: string = ""
 ): Omit<LeaderboardData, "dateRange" | "timezone"> {
   const offset = (page - 1) * limit;
-  const aggregatedUsers = aggregatePeriodRows(rows, sortBy);
+  const { users: aggregatedUsers, hiddenUserIds } = aggregatePeriodRows(
+    rows,
+    sortBy
+  );
   // Hidden users are dropped from the listing but stay in `stats` below, so
   // org-wide totals keep counting the work they did while they were here.
-  const visibleUsers = aggregatedUsers.filter((user) => !user.hidden);
+  const visibleUsers = aggregatedUsers.filter(
+    (user) => !hiddenUserIds.has(user.userId)
+  );
   const rankedUsers = visibleUsers.map((user, index) => ({
-    ...stripHiddenFlag(user),
+    ...user,
     rank: index + 1,
   }));
   const filteredUsers = rankedUsers.filter((user) =>
@@ -242,8 +250,12 @@ function buildPeriodUserRank(
   username: string,
   sortBy: SortBy = "tokens"
 ): LeaderboardUser | null {
-  const visibleUsers = aggregatePeriodRows(rows, sortBy).filter(
-    (user) => !user.hidden
+  const { users: aggregatedUsers, hiddenUserIds } = aggregatePeriodRows(
+    rows,
+    sortBy
+  );
+  const visibleUsers = aggregatedUsers.filter(
+    (user) => !hiddenUserIds.has(user.userId)
   );
   const usernameCacheKey = normalizeUsernameCacheKey(username);
   const matchingUsers = visibleUsers.filter(
@@ -256,7 +268,7 @@ function buildPeriodUserRank(
   }
 
   return {
-    ...stripHiddenFlag(user),
+    ...user,
     rank: visibleUsers.indexOf(user) + 1,
   };
 }
