@@ -65,6 +65,9 @@ export async function GET(request: Request) {
 
     // Account resolution: googleId → email → new user
     let userId: string;
+    // Non-null when the resolved account was hidden (offboarded). A freshly
+    // created account is never hidden.
+    let hiddenAt: Date | null = null;
 
     // 1. Look up by Google ID
     const existingByGoogleId = await db
@@ -75,6 +78,7 @@ export async function GET(request: Request) {
 
     if (existingByGoogleId.length > 0) {
       userId = existingByGoogleId[0].id;
+      hiddenAt = existingByGoogleId[0].hiddenAt;
       await db
         .update(users)
         .set({
@@ -94,6 +98,7 @@ export async function GET(request: Request) {
 
       if (existingByEmail.length > 0) {
         userId = existingByEmail[0].id;
+        hiddenAt = existingByEmail[0].hiddenAt;
         await db
           .update(users)
           .set({
@@ -119,6 +124,12 @@ export async function GET(request: Request) {
 
         userId = newUser.id;
       }
+    }
+
+    // An offboarded account must not be able to sign back in and mint a fresh
+    // session or API token. Restoring access is a deliberate admin unhide.
+    if (hiddenAt != null) {
+      return NextResponse.redirect(`${baseUrl}/login?error=account_hidden`);
     }
 
     const sessionToken = await createSession(userId, {

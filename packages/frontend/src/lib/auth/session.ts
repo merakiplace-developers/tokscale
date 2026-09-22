@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { db, sessions, users } from "@/lib/db";
 import { eq, and, gt } from "drizzle-orm";
+import { visibleUserCondition } from "@/lib/db/visibility";
 import { generateRandomString } from "./utils";
 import { authenticatePersonalToken } from "./personalTokens";
 
@@ -34,7 +35,15 @@ export async function getSession(): Promise<SessionUser | null> {
     })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))
-    .where(and(eq(sessions.token, sessionToken), gt(sessions.expiresAt, new Date())))
+    .where(
+      and(
+        eq(sessions.token, sessionToken),
+        gt(sessions.expiresAt, new Date()),
+        // A hidden user's sessions are deleted on offboarding; treat any that
+        // survive as invalid so the cookie can't outlive the account.
+        visibleUserCondition()
+      )
+    )
     .limit(1);
 
   if (result.length === 0) {

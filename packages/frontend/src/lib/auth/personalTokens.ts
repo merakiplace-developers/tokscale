@@ -182,6 +182,7 @@ export async function authenticatePersonalToken(
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
       isAdmin: users.isAdmin,
+      hiddenAt: users.hiddenAt,
       expiresAt: apiTokens.expiresAt,
     })
     .from(apiTokens)
@@ -194,6 +195,13 @@ export async function authenticatePersonalToken(
   }
 
   const record = result[0];
+
+  // Offboarding deletes a hidden user's tokens, but reject here too: a token
+  // issued between the hide and the delete — or restored from a backup —
+  // must not keep feeding submissions in under a hidden account.
+  if (record.hiddenAt != null) {
+    return { status: "invalid" };
+  }
   const isLegacyPlaintext = record.tokenValue === token;
 
   if (record.expiresAt && record.expiresAt <= new Date()) {
