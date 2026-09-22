@@ -40,6 +40,20 @@ export const users = pgTable(
     avatarUrl: text("avatar_url"),
     email: varchar("email", { length: 255 }),
     isAdmin: boolean("is_admin").notNull().default(false),
+    /**
+     * Set when the user is hidden from every public surface (leaderboard,
+     * profile, badge/embed). Offboarded accounts are hidden rather than
+     * deleted so their historical submissions still count toward org-wide
+     * totals. NULL means visible. See `lib/db/visibility.ts`.
+     */
+    hiddenAt: timestamp("hidden_at", { withTimezone: true }),
+    hiddenReason: varchar("hidden_reason", { length: 100 }),
+    /**
+     * First time the avatar probe saw Google's "photo unavailable"
+     * placeholder for this user. Cleared as soon as a real avatar returns.
+     * See `lib/offboarding/avatarProbe.ts`.
+     */
+    avatarMissingSince: timestamp("avatar_missing_since", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -54,6 +68,7 @@ export const users = pgTable(
     ),
     index("idx_users_github_id").on(table.githubId),
     index("idx_users_google_id").on(table.googleId),
+    index("idx_users_hidden_at").on(table.hiddenAt),
   ]
 );
 

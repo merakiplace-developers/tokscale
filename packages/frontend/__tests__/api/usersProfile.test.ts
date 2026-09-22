@@ -120,6 +120,11 @@ vi.mock("@/lib/db", () => ({
   dailyBreakdown: mockState.tables.dailyBreakdown,
 }));
 
+vi.mock("@/lib/db/visibility", () => ({
+  visibleUserCondition: () => "visibleUser",
+  visibleUserSql: (alias: string) => `${alias}.hidden_at IS NULL`,
+}));
+
 vi.mock("@/lib/db/usernameLookup", () => {
   class AmbiguousUsernameError extends Error {}
 
