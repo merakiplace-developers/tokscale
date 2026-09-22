@@ -7,7 +7,7 @@ import {
   usernameEqualsIgnoreCase,
 } from "@/lib/db/usernameLookup";
 import { eq, sql, and, gte } from "drizzle-orm";
-import { visibleUserCondition } from "@/lib/db/visibility";
+import { visibleUserCondition, visibleUserSql } from "@/lib/db/visibility";
 
 export type EmbedSortBy = "tokens" | "cost";
 
@@ -73,7 +73,7 @@ async function fetchUserEmbedStats(username: string, sortBy: EmbedSortBy): Promi
           ) AS rank
         FROM submissions s
         JOIN users u ON u.id = s.user_id
-        WHERE u.hidden_at IS NULL
+        WHERE ${visibleUserSql("u")}
       )
       SELECT rank FROM ranked WHERE user_id = ${result.id}
     `);

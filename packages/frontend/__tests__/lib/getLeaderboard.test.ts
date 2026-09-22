@@ -106,6 +106,7 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/db/visibility", () => ({
   visibleUserCondition: () => "visibleUser",
+  visibleUserSql: (alias: string) => `${alias}.hidden_at IS NULL`,
 }));
 
 vi.mock("@/lib/db/usernameLookup", () => {
