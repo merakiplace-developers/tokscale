@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
 import { runAvatarProbe } from "@/lib/offboarding/avatarProbe";
-import {
-  normalizeUsernameCacheKey,
-  revalidateUsernamePaths,
-} from "@/lib/db/usernameLookup";
+import { revalidateUserCaches } from "@/lib/offboarding/revalidateUserCaches";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -36,13 +33,7 @@ export async function GET(request: Request) {
     const changed = [...summary.hidden, ...summary.restored];
 
     for (const username of changed) {
-      const usernameCacheKey = normalizeUsernameCacheKey(username);
-      revalidateUsernamePaths(username);
-      revalidateTag(`user:${usernameCacheKey}`, "max");
-      revalidateTag(`user-rank:${usernameCacheKey}`, "max");
-      revalidateTag(`embed-user:${usernameCacheKey}`, "max");
-      revalidateTag(`embed-user:${usernameCacheKey}:tokens`, "max");
-      revalidateTag(`embed-user:${usernameCacheKey}:cost`, "max");
+      revalidateUserCaches(username);
     }
 
     if (changed.length > 0) {

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
+import { normalizeUsernameCacheKey } from '@/lib/db/usernameLookup';
 import ProfilePageClient from './ProfilePageClient';
 
 export const revalidate = 60;
@@ -11,8 +12,14 @@ async function getProfileData(username: string) {
     || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
     || 'http://127.0.0.1:3000';
   
+  // Tagged so hiding a user can drop this entry. Without the tag, Next keeps
+  // serving the last successful response once the route starts answering 404,
+  // and the profile stays readable after the account is hidden.
   const res = await fetch(`${baseUrl}/api/users/${username}`, {
-    next: { revalidate: 60 },
+    next: {
+      revalidate: 60,
+      tags: [`user:${normalizeUsernameCacheKey(username)}`],
+    },
   });
   
   if (!res.ok) {

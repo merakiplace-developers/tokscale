@@ -12,9 +12,9 @@
  *   bun run users:hide -- @alice --unhide
  *
  * Requires DATABASE_URL. Against the production database also pass
- * NODE_ENV=production so the client connects with SSL.
- *
- * Public pages are cached for 60 s, so the change shows up within a minute.
+ * NODE_ENV=production so the client connects with SSL. Set NEXT_PUBLIC_URL and
+ * CRON_SECRET too, so the deployed app can be told to drop its cached copies of
+ * the affected profiles — without that the profile page keeps serving them.
  */
 import { readFileSync } from "node:fs";
 import {
@@ -77,6 +77,50 @@ function parseArgs(argv: string[]): Options {
   return options;
 }
 
+/**
+ * Ask the deployed app to drop its cached views of these users.
+ *
+ * This script talks to the database directly, so it cannot call Next's
+ * revalidation APIs itself. Without this the profile page keeps serving the
+ * last successful response and a hidden user stays readable at /u/<username>.
+ */
+async function refreshCaches(usernames: string[]): Promise<void> {
+  const baseUrl = process.env.NEXT_PUBLIC_URL;
+  const secret = process.env.CRON_SECRET;
+
+  if (!baseUrl || !secret) {
+    console.warn(
+      "\n  ! NEXT_PUBLIC_URL / CRON_SECRET not set — cached pages were not refreshed."
+    );
+    console.warn(
+      "    /u/<username> may keep serving these profiles until those caches are dropped."
+    );
+    return;
+  }
+
+  try {
+    const response = await fetch(`${baseUrl}/api/internal/revalidate-user`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${secret}`,
+      },
+      body: JSON.stringify({ usernames }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    console.log(`  refreshed cached pages for ${usernames.length} user(s)`);
+  } catch (error) {
+    console.warn(
+      `\n  ! cache refresh failed (${error instanceof Error ? error.message : "unknown"}).`
+    );
+    console.warn("    /u/<username> may keep serving these profiles.");
+  }
+}
+
 async function main() {
   if (!process.env.DATABASE_URL) {
     console.error("DATABASE_URL is not set.");
@@ -134,6 +178,8 @@ async function main() {
     for (const username of restored) {
       console.log(`  + @${username} is visible again`);
     }
+
+    await refreshCaches(restored);
     console.log(
       `\nUnhid ${restored.length} user(s). Revoked API tokens are NOT restored — they must issue new ones.`
     );
@@ -150,6 +196,8 @@ async function main() {
       `  - @${result.username} hidden (revoked ${result.tokensDeleted} token(s), ${result.sessionsDeleted} session(s))`
     );
   }
+
+  await refreshCaches(results.map((result) => result.username));
 
   console.log(
     `\nHid ${results.length} user(s). Public pages catch up within ~60 s.`

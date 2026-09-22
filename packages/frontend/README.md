@@ -36,7 +36,9 @@ bun run users:hide -- --file offboarded.txt   # one identifier per line, # comme
 bun run users:hide -- @alice --unhide
 ```
 
-Requires `DATABASE_URL`. Against production also pass `NODE_ENV=production` so the client connects with SSL. Public pages are cached for 60 s, so changes show up within a minute.
+Requires `DATABASE_URL`. Against production also pass `NODE_ENV=production` so the client connects with SSL.
+
+Also set `NEXT_PUBLIC_URL` and `CRON_SECRET` when running against a deployed instance. The script writes to the database directly and cannot call Next's revalidation APIs, so it posts to `/api/internal/revalidate-user` afterwards to drop the cached copies of the affected profiles. Skipping that leaves `/u/<username>` serving the hidden profile: the page fetches its own `/api/users/[username]` route, and Next keeps the last successful response once that route starts answering 404. The leaderboard itself catches up within 60 s either way.
 
 ### Automatic detection
 
