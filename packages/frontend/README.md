@@ -38,6 +38,26 @@ bun run users:hide -- @alice --unhide
 
 Requires `DATABASE_URL`. Against production also pass `NODE_ENV=production` so the client connects with SSL. Public pages are cached for 60 s, so changes show up within a minute.
 
+### Automatic detection
+
+`/api/cron/avatar-probe` runs daily (see `crons` in `vercel.json`) and hides departed users without anyone maintaining a list.
+
+It works because deleting a Google Workspace account makes `lh3.googleusercontent.com` serve a fixed grayscale "photo unavailable" image for that user's photo URL — HTTP 200 with byte-identical content for every deleted account, while a malformed photo id answers 400. The probe hashes what each avatar URL returns and compares it against that known image.
+
+This is a proxy for "this person left", not proof, so the probe is deliberately cautious:
+
+- Only Google-hosted avatars are considered; GitHub avatars say nothing about Workspace membership.
+- The first sighting only records `users.avatar_missing_since`. Hiding needs a second run at least 20 h later, so one bad run cannot hide anyone.
+- A failed or non-200 probe changes nothing.
+- Users hidden by the probe are **automatically restored** if a real avatar comes back, which bounds the cost of a false positive. Users hidden by hand are never touched — that was a deliberate decision.
+- If Google ever changes that placeholder image, the hash stops matching and the probe simply stops hiding anyone.
+
+Set `CRON_SECRET` for the route to work; without it the endpoint returns 503 and nothing is hidden automatically. To run it by hand:
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/avatar-probe
+```
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

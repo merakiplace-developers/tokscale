@@ -48,6 +48,12 @@ export const users = pgTable(
      */
     hiddenAt: timestamp("hidden_at", { withTimezone: true }),
     hiddenReason: varchar("hidden_reason", { length: 100 }),
+    /**
+     * First time the avatar probe saw Google's "photo unavailable"
+     * placeholder for this user. Cleared as soon as a real avatar returns.
+     * See `lib/offboarding/avatarProbe.ts`.
+     */
+    avatarMissingSince: timestamp("avatar_missing_since", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
