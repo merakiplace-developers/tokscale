@@ -7,6 +7,7 @@ import {
   getSingleUsernameMatch,
   usernameEqualsIgnoreCase,
 } from "@/lib/db/usernameLookup";
+import { visibleUserCondition } from "@/lib/db/visibility";
 import { buildSubmissionFreshness } from "@/lib/submissionFreshness";
 
 const LEGACY_CLIENT_ALIASES: Record<string, string> = { kilocode: "kilo" };
@@ -34,7 +35,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
         createdAt: users.createdAt,
       })
       .from(users)
-      .where(usernameEqualsIgnoreCase(username))
+      .where(and(usernameEqualsIgnoreCase(username), visibleUserCondition()))
       .limit(USERNAME_LOOKUP_LIMIT);
     const user = getSingleUsernameMatch(matchingUsers, username);
 

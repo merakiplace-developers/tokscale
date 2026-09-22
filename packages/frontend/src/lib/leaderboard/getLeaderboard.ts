@@ -7,6 +7,7 @@ import {
   usernameEqualsIgnoreCase,
 } from "@/lib/db/usernameLookup";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
+import { visibleUserCondition } from "@/lib/db/visibility";
 import { buildSubmissionFreshness } from "@/lib/submissionFreshness";
 import type { LeaderboardData, LeaderboardUser, Period, SortBy } from "@/lib/leaderboard/types";
 
@@ -22,6 +23,22 @@ interface LeaderboardPeriodRow {
   updatedAt: string;
   cliVersion: string | null;
   schemaVersion: number;
+  /** Hidden users stay in the aggregate stats but are kept off the listing. */
+  hidden: boolean;
+}
+
+/**
+ * Period rows are aggregated with hidden users still included so the stats
+ * block reports true org-wide totals; the flag is dropped right before the
+ * visible listing is built.
+ */
+type AggregatedPeriodUser = Omit<LeaderboardUser, "rank"> & { hidden: boolean };
+
+function stripHiddenFlag(
+  user: AggregatedPeriodUser
+): Omit<LeaderboardUser, "rank"> {
+  const { hidden: _hidden, ...rest } = user;
+  return rest;
 }
 
 interface PeriodDateRange {
@@ -39,6 +56,7 @@ interface PeriodLeaderboardDbRow {
   updatedAt: Date | string;
   cliVersion: string | null;
   schemaVersion: number | null;
+  hiddenAt: Date | string | null;
 }
 
 interface AllTimeLeaderboardDbRow {
@@ -121,8 +139,8 @@ function compareLeaderboardUsers(
 function aggregatePeriodRows(
   rows: LeaderboardPeriodRow[],
   sortBy: SortBy
-): Array<Omit<LeaderboardUser, "rank">> {
-  const usersById = new Map<string, Omit<LeaderboardUser, "rank">>();
+): AggregatedPeriodUser[] {
+  const usersById = new Map<string, AggregatedPeriodUser>();
 
   for (const row of rows) {
     const existing = usersById.get(row.userId);
@@ -155,6 +173,7 @@ function aggregatePeriodRows(
         cliVersion: row.cliVersion,
         schemaVersion: row.schemaVersion,
       }),
+      hidden: row.hidden,
     });
   }
 
@@ -184,8 +203,11 @@ function buildPeriodLeaderboardData(
 ): Omit<LeaderboardData, "dateRange" | "timezone"> {
   const offset = (page - 1) * limit;
   const aggregatedUsers = aggregatePeriodRows(rows, sortBy);
-  const rankedUsers = aggregatedUsers.map((user, index) => ({
-    ...user,
+  // Hidden users are dropped from the listing but stay in `stats` below, so
+  // org-wide totals keep counting the work they did while they were here.
+  const visibleUsers = aggregatedUsers.filter((user) => !user.hidden);
+  const rankedUsers = visibleUsers.map((user, index) => ({
+    ...stripHiddenFlag(user),
     rank: index + 1,
   }));
   const filteredUsers = rankedUsers.filter((user) =>
@@ -220,9 +242,11 @@ function buildPeriodUserRank(
   username: string,
   sortBy: SortBy = "tokens"
 ): LeaderboardUser | null {
-  const aggregatedUsers = aggregatePeriodRows(rows, sortBy);
+  const visibleUsers = aggregatePeriodRows(rows, sortBy).filter(
+    (user) => !user.hidden
+  );
   const usernameCacheKey = normalizeUsernameCacheKey(username);
-  const matchingUsers = aggregatedUsers.filter(
+  const matchingUsers = visibleUsers.filter(
     (user) => normalizeUsernameCacheKey(user.username) === usernameCacheKey
   );
   const user = getSingleUsernameMatch(matchingUsers, username);
@@ -232,8 +256,8 @@ function buildPeriodUserRank(
   }
 
   return {
-    ...user,
-    rank: aggregatedUsers.indexOf(user) + 1,
+    ...stripHiddenFlag(user),
+    rank: visibleUsers.indexOf(user) + 1,
   };
 }
 
@@ -257,6 +281,7 @@ async function fetchPeriodLeaderboardRows(
       updatedAt: submissions.updatedAt,
       cliVersion: submissions.cliVersion,
       schemaVersion: submissions.schemaVersion,
+      hiddenAt: users.hiddenAt,
     })
     .from(dailyBreakdown)
     .innerJoin(submissions, eq(dailyBreakdown.submissionId, submissions.id))
@@ -280,6 +305,7 @@ async function fetchPeriodLeaderboardRows(
       : new Date(row.updatedAt).toISOString(),
     cliVersion: row.cliVersion,
     schemaVersion: Number(row.schemaVersion) || 0,
+    hidden: row.hiddenAt != null,
   }));
 }
 
@@ -333,6 +359,7 @@ async function fetchLeaderboardData(
       })
       .from(submissions)
       .innerJoin(users, eq(submissions.userId, users.id))
+      .where(visibleUserCondition())
       .groupBy(users.id, users.username, users.displayName, users.avatarUrl)
       .as("ranked");
 
@@ -428,12 +455,13 @@ async function fetchLeaderboardData(
     })
     .from(submissions)
     .innerJoin(users, eq(submissions.userId, users.id))
+    .where(visibleUserCondition())
     .groupBy(users.id, users.username, users.displayName, users.avatarUrl)
     .orderBy(desc(orderByColumn))
     .limit(limit)
     .offset(offset);
 
-  const [results, globalStats] = await Promise.all([
+  const [results, globalStats, visibleUserCount] = await Promise.all([
     leaderboardQuery,
     db
       .select({
@@ -443,9 +471,17 @@ async function fetchLeaderboardData(
         uniqueUsers: sql<number>`COUNT(DISTINCT ${submissions.userId})`,
       })
       .from(submissions),
+    // `globalStats.uniqueUsers` counts every submitter, hidden ones included,
+    // so it would overstate the page count now that the listing is filtered.
+    // Pagination needs its own count over visible users only.
+    db
+      .select({ count: sql<number>`COUNT(DISTINCT ${submissions.userId})` })
+      .from(submissions)
+      .innerJoin(users, eq(submissions.userId, users.id))
+      .where(visibleUserCondition()),
   ]);
 
-  const totalUsers = Number(globalStats[0]?.uniqueUsers) || 0;
+  const totalUsers = Number(visibleUserCount[0]?.count) || 0;
   const totalPages = Math.ceil(totalUsers / limit);
 
   return {
@@ -520,7 +556,7 @@ async function fetchUserRank(
   const userResult = await db
     .select({ id: users.id, username: users.username, displayName: users.displayName, avatarUrl: users.avatarUrl })
     .from(users)
-    .where(usernameEqualsIgnoreCase(username))
+    .where(and(usernameEqualsIgnoreCase(username), visibleUserCondition()))
     .limit(USERNAME_LOOKUP_LIMIT);
 
   const user = getSingleUsernameMatch(userResult, username);
@@ -573,6 +609,8 @@ async function fetchUserRank(
           total: compareColumn.as("total"),
         })
         .from(submissions)
+        .innerJoin(users, eq(submissions.userId, users.id))
+        .where(visibleUserCondition())
         .groupBy(submissions.userId)
         .having(sql`${compareColumn} > ${userCompareValue}`)
         .as("higher_ranked")

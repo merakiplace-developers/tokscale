@@ -7,6 +7,7 @@ import {
   usernameEqualsIgnoreCase,
 } from "@/lib/db/usernameLookup";
 import { eq, sql, and, gte } from "drizzle-orm";
+import { visibleUserCondition } from "@/lib/db/visibility";
 
 export type EmbedSortBy = "tokens" | "cost";
 
@@ -47,7 +48,7 @@ async function fetchUserEmbedStats(username: string, sortBy: EmbedSortBy): Promi
     })
     .from(users)
     .leftJoin(submissions, eq(submissions.userId, users.id))
-    .where(usernameEqualsIgnoreCase(username))
+    .where(and(usernameEqualsIgnoreCase(username), visibleUserCondition()))
     .limit(USERNAME_LOOKUP_LIMIT);
   const result = getSingleUsernameMatch(matchingUsers, username);
 
@@ -63,14 +64,16 @@ async function fetchUserEmbedStats(username: string, sortBy: EmbedSortBy): Promi
     const rankResult = await db.execute<{ rank: number }>(sql`
       WITH ranked AS (
         SELECT
-          user_id,
+          s.user_id,
           RANK() OVER (
             ORDER BY
               ${sortBy === "cost"
-                ? sql`CAST(total_cost AS DECIMAL(12,4)) DESC, total_tokens DESC`
-                : sql`total_tokens DESC, CAST(total_cost AS DECIMAL(12,4)) DESC`}
+                ? sql`CAST(s.total_cost AS DECIMAL(12,4)) DESC, s.total_tokens DESC`
+                : sql`s.total_tokens DESC, CAST(s.total_cost AS DECIMAL(12,4)) DESC`}
           ) AS rank
-        FROM submissions
+        FROM submissions s
+        JOIN users u ON u.id = s.user_id
+        WHERE u.hidden_at IS NULL
       )
       SELECT rank FROM ranked WHERE user_id = ${result.id}
     `);
@@ -116,7 +119,7 @@ async function fetchUserEmbedContributions(username: string): Promise<EmbedContr
   const matchingUsers = await db
     .select({ id: users.id })
     .from(users)
-    .where(usernameEqualsIgnoreCase(username))
+    .where(and(usernameEqualsIgnoreCase(username), visibleUserCondition()))
     .limit(USERNAME_LOOKUP_LIMIT);
   const user = getSingleUsernameMatch(matchingUsers, username);
 
