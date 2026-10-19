@@ -49,6 +49,7 @@ export const SOURCE_DISPLAY_NAMES: Record<string, string> = {
   zed: "Zed Agent",
   "anthropic-api": "Anthropic API",
   synthetic: "Synthetic",
+  aside: "Aside",
 };
 
 // Client logos from GitHub CDN (public repo)
@@ -78,6 +79,7 @@ export const SOURCE_LOGOS: Record<string, string> = {
   zed: `${GITHUB_CDN_BASE}/client-zed.webp`,
   "anthropic-api": `${GITHUB_CDN_BASE}/client-claude.jpg`,
   synthetic: `${GITHUB_CDN_BASE}/client-synthetic.png`,
+  aside: `${GITHUB_CDN_BASE}/client-aside.png`,
 };
 
 export const SOURCE_COLORS: Record<string, string> = {
@@ -105,6 +107,7 @@ export const SOURCE_COLORS: Record<string, string> = {
   zed: "#084CCF",
   "anthropic-api": "#D97706",
   synthetic: "#4ADE80",
+  aside: "#64748B",
 };
 
 export const SOURCE_TEXT_COLORS: Record<string, string> = {
