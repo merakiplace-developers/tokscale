@@ -43,6 +43,7 @@ const SUPPORTED_SOURCES = [
   "zed",
   "anthropic-api",
   "synthetic",
+  "aside",
 ] as const;
 const SourceSchema = z.enum(SUPPORTED_SOURCES);
 

@@ -147,6 +147,7 @@ describe("hermes client validation regression", () => {
     "antigravity",
     "zed",
     "anthropic-api",
+    "aside",
   ])("accepts %s as a valid client", (clientName) => {
     const result = validateSubmission(makeBaseSubmission(clientName));
     expect(result.errors).toEqual([]);
